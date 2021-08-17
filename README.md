@@ -1,4 +1,4 @@
-# Trying to run XNU on Raspberry Pi 3 (BCM2835)
+# Trying to run XNU on Raspberry Pi 3 (BCM2837)
 
 I am trying to run XNU/Hackitosh, if possible. You can support me for this project :)
 
