@@ -17,3 +17,11 @@ Raspberry Pi:
 Hackintosh:
 
 - Try to make an ARM64 macOS sysroot
+
+## Build
+
+The kernel can be built with the following command:
+
+```
+make SDKROOT=macosx ARCH_CONFIGS=ARM64 MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS=RELEASE/DEVELOPEMENT
+```
