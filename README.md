@@ -29,8 +29,8 @@ Hackintosh:
 
 ## Build
 
-The kernel can be built with the following command:
+The following kernel version(s) can be successfully built at the moment:
 
-```
-make SDKROOT=macosx ARCH_CONFIGS=ARM64 MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS=RELEASE/DEVELOPEMENT
-```
+- [XNU 7195.81.3](Build/XNU-7195.81.3.md)
+
+See the doc for detailed build steps and patches.
