@@ -1,6 +1,6 @@
 # XNU on Raspberry Pi 3 (BCM2837)
 
-I am trying to run XNU/Hackintosh, if possible. You can support me on this project :)
+I am trying to run XNU/Hackintosh, if possible. You can back me on this project :)
 
 ## Roadmap
 
