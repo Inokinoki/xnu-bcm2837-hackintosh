@@ -29,7 +29,7 @@ Hackintosh:
 
 ## Build
 
-The following kernel version(s) has been successfully built at the moment:
+The following kernel version(s) can be successfully built at the moment:
 
 - [XNU 7195.81.3](Build/XNU-7195.81.3.md)
 
