@@ -8,10 +8,14 @@ XNU Kernel:
 
 - [x] Compile Mach-O
 
-Then, there are two options. Either:
+Then, there are three options. Either:
 
-- [ ] Convert to an ELF Kernel
-- [ ] Load ELF Kernel
+- [ ] Convert to an ELF Kernel and then raw image
+- [ ] Load the raw image
+
+or:
+
+- [x] Convert and load raw image
 
 or, we can write an Mach-O loader in ELF format, which can be loaded by Raspberry Pi:
 
