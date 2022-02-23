@@ -8,20 +8,22 @@ XNU Kernel:
 
 - [x] Compile Mach-O
 
-Then, there are three options. Either:
+~Then, there are three options. Either:~
 
-- [ ] Convert to an ELF Kernel and then raw image
-- [ ] Load the raw image
+- ~[ ] Convert to an ELF Kernel and then raw image~
+- ~[ ] Load the raw image~
 
-or:
+~or:~
 
-- [x] Convert and load raw image
+- ~[x] Convert and load raw image~
 
-or, we can write an Mach-O loader in ELF format, which can be loaded by Raspberry Pi:
+~or,~
+
+Then, we can write an Mach-O loader in ELF format, which can be loaded by Raspberry Pi:
 
 - [ ] Maybe an Mach-O loader
 
-After one of those, the kernel can be debugged and further developed:
+The kernel can be debugged and further developed:
 
 - [ ] Make sure the kernel is bootable
 - [ ] Make sure UART works
