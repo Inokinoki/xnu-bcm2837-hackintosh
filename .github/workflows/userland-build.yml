@@ -33,6 +33,11 @@ jobs:
       dyld-version: ${{ steps.downloads.outputs.dyld_version }}
       launchd-version: ${{ steps.downloads.outputs.launchd_version }}
       libdispatch-version: ${{ steps.downloads.outputs.libdispatch_version }}
+      shell_cmds-version: ${{ steps.downloads.outputs.shell_cmds_version }}
+      file_cmds-version: ${{ steps.downloads.outputs.file_cmds_version }}
+      system_cmds-version: ${{ steps.downloads.outputs.system_cmds_version }}
+      network_cmds-version: ${{ steps.downloads.outputs.network_cmds_version }}
+      diskdev_cmds-version: ${{ steps.downloads.outputs.diskdev_cmds_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,18 +57,21 @@ jobs:
             for version in "${versions[@]}"; do
               echo "Trying ${name}-${version}..."
               url="https://opensource.apple.com/tarballs/${name}/${name}-${version}.tar.gz"
-              if curl -fsSL -o "${name}-${version}.tar.gz" "$url" 2>/dev/null; then
-                echo "✅ Downloaded ${name}-${version}"
-                # Extract and verify
-                tar xzf "${name}-${version}.tar.gz" 2>/dev/null || true
-                # Find the actual extracted directory
-                extracted_dir=$(find . -maxdepth 1 -type d -name "${name}*" | head -1)
-                if [ -n "$extracted_dir" ]; then
-                  echo "   Extracted to: $extracted_dir"
-                  echo "${name}_version=${version}" >> $GITHUB_OUTPUT
-                  echo "${name}_dir=${extracted_dir}" >> $GITHUB_OUTPUT
-                  return 0
+              if curl -fsSL --connect-timeout 10 -o "${name}-${version}.tar.gz" "$url" 2>/dev/null; then
+                # Verify it's a valid gzip
+                if gzip -t "${name}-${version}.tar.gz" 2>/dev/null; then
+                  echo "✅ Downloaded ${name}-${version}"
+                  tar xzf "${name}-${version}.tar.gz" 2>/dev/null || true
+                  extracted_dir=$(find . -maxdepth 1 -type d -name "${name}*" | head -1)
+                  if [ -n "$extracted_dir" ]; then
+                    echo "   Extracted to: $extracted_dir"
+                    # Use underscore for output variable names
+                    varname=$(echo "${name}" | tr '-' '_')
+                    echo "${varname}_version=${version}" >> $GITHUB_OUTPUT
+                    return 0
+                  fi
                 fi
+                rm -f "${name}-${version}.tar.gz"
               fi
             done
             echo "❌ Could not download ${name}"
@@ -73,29 +81,50 @@ jobs:
           echo "=== Checking Apple Open Source availability ==="
           echo ""
           
-          # XNU kernel
+          # Core components
           echo "### XNU Kernel ###"
           try_download "xnu" "10063.141.1" "8792.81.2" "8020.140.41" "7195.141.2" "7195.81.3" || true
           echo ""
           
-          # dyld
           echo "### dyld ###"
           try_download "dyld" "1125.2" "1042.1" "955.6" "852.2" "750.6" "655.1.1" || true
           echo ""
           
-          # launchd
           echo "### launchd ###"
           try_download "launchd" "2038.120.1" "1336.261.2" "1205.70.9" "842.92.1" || true
           echo ""
           
-          # libdispatch
           echo "### libdispatch ###"
           try_download "libdispatch" "1462.0.4" "1412.0.4" "1271.120.2" "1173.100.2" || true
           echo ""
           
-          # Libc
           echo "### Libc ###"
           try_download "Libc" "1583.100.7" "1506.100.13" "1439.141.1" "1353.100.2" || true
+          echo ""
+          
+          # Command utilities
+          echo "### shell_cmds ###"
+          try_download "shell_cmds" "216.60.1" "207.100.4" "198.100.2" "187" || true
+          echo ""
+          
+          echo "### file_cmds ###"
+          try_download "file_cmds" "321.100.10" "287.100.2" "272.250.1" "264.50.1" || true
+          echo ""
+          
+          echo "### system_cmds ###"
+          try_download "system_cmds" "880.100.5" "854.100.1" "805.220.1" "790.30.1" || true
+          echo ""
+          
+          echo "### network_cmds ###"
+          try_download "network_cmds" "606.100.2" "594.100.2" "543.260.3" "511.50.3" || true
+          echo ""
+          
+          echo "### diskdev_cmds ###"
+          try_download "diskdev_cmds" "667.100.1" "640.100.4" "593.100.3" "576.100.5" || true
+          echo ""
+          
+          echo "### mDNSResponder ###"
+          try_download "mDNSResponder" "1557.140.1" "1310.140.1" "1096.100.3" "878.270.2" || true
           echo ""
           
           # List what we got
@@ -114,8 +143,8 @@ jobs:
               echo "### $dir ###"
               echo "Build systems found:"
               find "$dir" -maxdepth 2 \( -name "*.xcodeproj" -o -name "Makefile" -o -name "CMakeLists.txt" -o -name "*.xcworkspace" \) 2>/dev/null | head -5 || echo "  (none)"
-              echo "Key directories:"
-              ls -d "${dir}"*/ 2>/dev/null | head -5 || echo "  (none)"
+              echo "Source files:"
+              find "$dir" -maxdepth 2 -name "*.c" 2>/dev/null | wc -l | xargs echo "  .c files:"
               echo ""
             fi
           done
@@ -129,7 +158,7 @@ jobs:
           if-no-files-found: warn
 
   # ==========================================================================
-  # Verify system libdispatch (already installed on macOS)
+  # Verify system libdispatch
   # ==========================================================================
   verify-system-libdispatch:
     name: Verify System libdispatch
@@ -138,45 +167,38 @@ jobs:
       - name: Check system libdispatch
         run: |
           echo "=== System libdispatch verification ==="
-          echo ""
-          
-          echo "### libdispatch headers ###"
-          ls -la /usr/include/dispatch/ 2>/dev/null || echo "Headers in SDK"
           
           SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          echo "SDK: $SDKROOT"
           echo ""
-          echo "### SDK dispatch headers ###"
-          ls -la "$SDKROOT/usr/include/dispatch/" | head -20
+          
+          echo "### Dispatch headers ###"
+          ls "$SDKROOT/usr/include/dispatch/" | head -10
           
           echo ""
-          echo "### System library ###"
-          ls -la /usr/lib/system/libdispatch* 2>/dev/null || echo "In system dyld cache"
-          
-          echo ""
-          echo "### Compile test ###"
+          echo "### Compile and run test ###"
           cat > /tmp/test_dispatch.c << 'EOF'
           #include <dispatch/dispatch.h>
           #include <stdio.h>
-          
           int main() {
-              dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-              printf("libdispatch works! Queue: %p\n", (void*)queue);
+              dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+              printf("libdispatch OK: queue=%p\n", (void*)q);
               return 0;
           }
           EOF
           
-          clang -arch arm64 /tmp/test_dispatch.c -o /tmp/test_dispatch && echo "✅ Compilation successful"
-          /tmp/test_dispatch && echo "✅ Execution successful"
+          clang -arch arm64 /tmp/test_dispatch.c -o /tmp/test_dispatch
+          /tmp/test_dispatch
+          echo "✅ System libdispatch works"
 
   # ==========================================================================
-  # Try to build dyld
+  # Build shell_cmds
   # ==========================================================================
-  build-dyld:
-    name: Build dyld
+  build-shell-cmds:
+    name: Build shell_cmds
     runs-on: macos-14
     needs: check-sources
-    if: needs.check-sources.outputs.dyld-version != ''
-    continue-on-error: true
+    if: needs.check-sources.outputs.shell_cmds-version != ''
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -192,52 +214,54 @@ jobs:
           name: darwin-sources
           path: ~/sources
 
-      - name: Build dyld
+      - name: Build shell_cmds
         run: |
           cd ~/sources
+          SHELL_DIR=$(find . -maxdepth 1 -type d -name "shell_cmds*" | head -1)
           
-          # Find dyld directory
-          DYLD_DIR=$(find . -maxdepth 1 -type d -name "dyld*" | head -1)
-          
-          if [ -z "$DYLD_DIR" ]; then
-            echo "❌ dyld source directory not found"
-            ls -la
+          if [ -z "$SHELL_DIR" ]; then
+            echo "shell_cmds not found"
             exit 1
           fi
           
-          echo "==> Found dyld at: $DYLD_DIR"
-          cd "$DYLD_DIR"
+          echo "==> Building from $SHELL_DIR"
+          cd "$SHELL_DIR"
           
-          echo "==> Contents:"
-          ls -la
-          
-          if [ -f dyld.xcodeproj/project.pbxproj ]; then
-            echo ""
-            echo "==> Xcode project found, listing targets..."
-            xcodebuild -project dyld.xcodeproj -list 2>&1 || true
-            
-            echo ""
-            echo "==> Attempting build..."
-            xcodebuild -project dyld.xcodeproj \
+          # Try xcodebuild first
+          if [ -f *.xcodeproj/project.pbxproj ]; then
+            echo "==> Using Xcode..."
+            xcodebuild -project *.xcodeproj \
               -alltargets \
               -configuration Release \
               ARCHS=arm64 \
               SDKROOT=macosx \
               CODE_SIGNING_ALLOWED=NO \
-              2>&1 | tail -200 || echo "Build completed (with expected errors)"
+              2>&1 | tail -50 || echo "Xcode build completed"
           else
-            echo "No Xcode project found"
+            # Manual build of simple commands
+            echo "==> Manual build..."
+            CFLAGS="-arch arm64 -O2 -isysroot $(xcrun --sdk macosx --show-sdk-path)"
+            mkdir -p ~/built/bin
+            
+            for cmd in echo pwd hostname sleep true false; do
+              if [ -d "$cmd" ] && [ -f "$cmd/$cmd.c" ]; then
+                echo "Building $cmd..."
+                clang $CFLAGS -o ~/built/bin/$cmd "$cmd/$cmd.c" 2>&1 || echo "  (failed)"
+              fi
+            done
+            
+            echo "==> Built binaries:"
+            ls -la ~/built/bin/ 2>/dev/null || echo "(none)"
           fi
 
   # ==========================================================================
-  # Try to build launchd
+  # Build file_cmds
   # ==========================================================================
-  build-launchd:
-    name: Build launchd
+  build-file-cmds:
+    name: Build file_cmds
     runs-on: macos-14
     needs: check-sources
-    if: needs.check-sources.outputs.launchd-version != ''
-    continue-on-error: true
+    if: needs.check-sources.outputs.file_cmds-version != ''
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -253,49 +277,122 @@ jobs:
           name: darwin-sources
           path: ~/sources
 
-      - name: Build launchd
+      - name: Build file_cmds
         run: |
           cd ~/sources
+          FILE_DIR=$(find . -maxdepth 1 -type d -name "file_cmds*" | head -1)
           
-          # Find launchd directory
-          LAUNCHD_DIR=$(find . -maxdepth 1 -type d -name "launchd*" | head -1)
-          
-          if [ -z "$LAUNCHD_DIR" ]; then
-            echo "❌ launchd source directory not found"
-            ls -la
+          if [ -z "$FILE_DIR" ]; then
+            echo "file_cmds not found"
             exit 1
           fi
           
-          echo "==> Found launchd at: $LAUNCHD_DIR"
-          cd "$LAUNCHD_DIR"
+          echo "==> Building from $FILE_DIR"
+          cd "$FILE_DIR"
           
-          echo "==> Contents:"
-          ls -la
-          
-          # Check for xcodeproj
-          XCPROJ=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
-          
-          if [ -n "$XCPROJ" ]; then
-            echo ""
-            echo "==> Xcode project found: $XCPROJ"
-            xcodebuild -project "$XCPROJ" -list 2>&1 || true
-            
-            echo ""
-            echo "==> Attempting build..."
-            xcodebuild -project "$XCPROJ" \
+          if [ -f *.xcodeproj/project.pbxproj ]; then
+            echo "==> Using Xcode..."
+            xcodebuild -project *.xcodeproj \
               -alltargets \
               -configuration Release \
               ARCHS=arm64 \
               SDKROOT=macosx \
               CODE_SIGNING_ALLOWED=NO \
-              2>&1 | tail -200 || echo "Build completed (with expected errors)"
-          elif [ -f Makefile ]; then
-            echo ""
-            echo "==> Makefile found, attempting build..."
-            make 2>&1 | tail -100 || echo "Make completed (with expected errors)"
-          else
-            echo "No build system found"
-            find . -name "*.c" -o -name "*.m" | head -20
+              2>&1 | tail -50 || echo "Xcode build completed"
+          fi
+
+  # ==========================================================================
+  # Build system_cmds
+  # ==========================================================================
+  build-system-cmds:
+    name: Build system_cmds
+    runs-on: macos-14
+    needs: check-sources
+    if: needs.check-sources.outputs.system_cmds-version != ''
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Download sources
+        uses: actions/download-artifact@v4
+        with:
+          name: darwin-sources
+          path: ~/sources
+
+      - name: Build system_cmds
+        run: |
+          cd ~/sources
+          SYS_DIR=$(find . -maxdepth 1 -type d -name "system_cmds*" | head -1)
+          
+          if [ -z "$SYS_DIR" ]; then
+            echo "system_cmds not found"
+            exit 1
+          fi
+          
+          echo "==> Building from $SYS_DIR"
+          cd "$SYS_DIR"
+          
+          if [ -f *.xcodeproj/project.pbxproj ]; then
+            echo "==> Using Xcode..."
+            xcodebuild -project *.xcodeproj \
+              -alltargets \
+              -configuration Release \
+              ARCHS=arm64 \
+              SDKROOT=macosx \
+              CODE_SIGNING_ALLOWED=NO \
+              2>&1 | tail -100 || echo "Xcode build completed"
+          fi
+
+  # ==========================================================================
+  # Build network_cmds
+  # ==========================================================================
+  build-network-cmds:
+    name: Build network_cmds
+    runs-on: macos-14
+    needs: check-sources
+    if: needs.check-sources.outputs.network_cmds-version != ''
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Download sources
+        uses: actions/download-artifact@v4
+        with:
+          name: darwin-sources
+          path: ~/sources
+
+      - name: Build network_cmds
+        run: |
+          cd ~/sources
+          NET_DIR=$(find . -maxdepth 1 -type d -name "network_cmds*" | head -1)
+          
+          if [ -z "$NET_DIR" ]; then
+            echo "network_cmds not found"
+            exit 1
+          fi
+          
+          echo "==> Building from $NET_DIR"
+          cd "$NET_DIR"
+          
+          if [ -f *.xcodeproj/project.pbxproj ]; then
+            echo "==> Using Xcode..."
+            xcodebuild -project *.xcodeproj \
+              -alltargets \
+              -configuration Release \
+              ARCHS=arm64 \
+              SDKROOT=macosx \
+              CODE_SIGNING_ALLOWED=NO \
+              2>&1 | tail -100 || echo "Xcode build completed"
           fi
 
   # ==========================================================================
@@ -321,6 +418,13 @@ jobs:
             "Userland/Libc.md"
             "Userland/dyld.md"
             "Userland/CoreFoundation.md"
+            "Userland/shell_cmds.md"
+            "Userland/file_cmds.md"
+            "Userland/system_cmds.md"
+            "Userland/network_cmds.md"
+            "Userland/diskdev_cmds.md"
+            "Userland/mDNSResponder.md"
+            "Userland/Security.md"
           )
           
           all_ok=true
@@ -358,45 +462,35 @@ jobs:
   build-summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [check-sources, verify-system-libdispatch, build-dyld, build-launchd, validate-docs]
+    needs: [check-sources, verify-system-libdispatch, build-shell-cmds, build-file-cmds, build-system-cmds, build-network-cmds, validate-docs]
     if: always()
     steps:
       - name: Generate summary
         run: |
           echo "# Darwin Userland Build Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Source Availability" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Source Availability (Apple Open Source)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Core Components" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Version | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|---------|--------|" >> $GITHUB_STEP_SUMMARY
           
-          # XNU
-          if [ -n "${{ needs.check-sources.outputs.xnu-version }}" ]; then
-            echo "| XNU | ${{ needs.check-sources.outputs.xnu-version }} | ✅ Available |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| XNU | - | ⚠️ Not found |" >> $GITHUB_STEP_SUMMARY
-          fi
+          [ -n "${{ needs.check-sources.outputs.xnu-version }}" ] && echo "| XNU | ${{ needs.check-sources.outputs.xnu-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| XNU | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.check-sources.outputs.dyld-version }}" ] && echo "| dyld | ${{ needs.check-sources.outputs.dyld-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| dyld | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.check-sources.outputs.launchd-version }}" ] && echo "| launchd | ${{ needs.check-sources.outputs.launchd-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| launchd | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.check-sources.outputs.libdispatch-version }}" ] && echo "| libdispatch | ${{ needs.check-sources.outputs.libdispatch-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| libdispatch | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
           
-          # dyld
-          if [ -n "${{ needs.check-sources.outputs.dyld-version }}" ]; then
-            echo "| dyld | ${{ needs.check-sources.outputs.dyld-version }} | ✅ Available |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| dyld | - | ⚠️ Not found |" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Command Utilities" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Version | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|--------|" >> $GITHUB_STEP_SUMMARY
           
-          # launchd
-          if [ -n "${{ needs.check-sources.outputs.launchd-version }}" ]; then
-            echo "| launchd | ${{ needs.check-sources.outputs.launchd-version }} | ✅ Available |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| launchd | - | ⚠️ Not found |" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          # libdispatch
-          if [ -n "${{ needs.check-sources.outputs.libdispatch-version }}" ]; then
-            echo "| libdispatch | ${{ needs.check-sources.outputs.libdispatch-version }} | ✅ Available |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| libdispatch | - | ⚠️ Not found |" >> $GITHUB_STEP_SUMMARY
-          fi
+          [ -n "${{ needs.check-sources.outputs.shell_cmds-version }}" ] && echo "| shell_cmds | ${{ needs.check-sources.outputs.shell_cmds-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| shell_cmds | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.check-sources.outputs.file_cmds-version }}" ] && echo "| file_cmds | ${{ needs.check-sources.outputs.file_cmds-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| file_cmds | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.check-sources.outputs.system_cmds-version }}" ] && echo "| system_cmds | ${{ needs.check-sources.outputs.system_cmds-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| system_cmds | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.check-sources.outputs.network_cmds-version }}" ] && echo "| network_cmds | ${{ needs.check-sources.outputs.network_cmds-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| network_cmds | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.check-sources.outputs.diskdev_cmds-version }}" ] && echo "| diskdev_cmds | ${{ needs.check-sources.outputs.diskdev_cmds-version }} | ✅ |" >> $GITHUB_STEP_SUMMARY || echo "| diskdev_cmds | - | ⚠️ |" >> $GITHUB_STEP_SUMMARY
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Build Results" >> $GITHUB_STEP_SUMMARY
@@ -404,13 +498,15 @@ jobs:
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| System libdispatch | ${{ needs.verify-system-libdispatch.result == 'success' && '✅ Works' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| dyld build | ${{ needs.build-dyld.result == 'success' && '✅ Success' || (needs.build-dyld.result == 'skipped' && '⏭️ Skipped' || '⚠️ Issues') }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| launchd build | ${{ needs.build-launchd.result == 'success' && '✅ Success' || (needs.build-launchd.result == 'skipped' && '⏭️ Skipped' || '⚠️ Issues') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| shell_cmds | ${{ needs.build-shell-cmds.result == 'success' && '✅' || (needs.build-shell-cmds.result == 'skipped' && '⏭️ Skipped' || '⚠️') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| file_cmds | ${{ needs.build-file-cmds.result == 'success' && '✅' || (needs.build-file-cmds.result == 'skipped' && '⏭️ Skipped' || '⚠️') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| system_cmds | ${{ needs.build-system-cmds.result == 'success' && '✅' || (needs.build-system-cmds.result == 'skipped' && '⏭️ Skipped' || '⚠️') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| network_cmds | ${{ needs.build-network-cmds.result == 'success' && '✅' || (needs.build-network-cmds.result == 'skipped' && '⏭️ Skipped' || '⚠️') }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Documentation | ${{ needs.validate-docs.result == 'success' && '✅ Valid' || '❌ Issues' }} |" >> $GITHUB_STEP_SUMMARY
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Notes" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **libdispatch**: Using system library (already available on macOS)" >> $GITHUB_STEP_SUMMARY
-          echo "- **dyld/launchd**: May require additional Apple-internal dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target**: ARM64 (Raspberry Pi 3)" >> $GITHUB_STEP_SUMMARY
+          echo "- **libdispatch**: Using system library" >> $GITHUB_STEP_SUMMARY
           echo "- See [Userland documentation](Userland/README.md) for build instructions" >> $GITHUB_STEP_SUMMARY
