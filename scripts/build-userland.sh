@@ -12,14 +12,17 @@ set -e
 # Configuration
 # =============================================================================
 
-# Versions (macOS 11.x / Big Sur compatible with XNU 7195.81.3)
-LIBC_VERSION="${LIBC_VERSION:-1439.141.1}"
-LIBDISPATCH_VERSION="${LIBDISPATCH_VERSION:-1271.120.2}"
-LIBXPC_VERSION="${LIBXPC_VERSION:-1336.261.2}"
-LAUNCHD_VERSION="${LAUNCHD_VERSION:-1336.261.2}"
-DYLD_VERSION="${DYLD_VERSION:-832.7.3}"
-CF_VERSION="${CF_VERSION:-1677.104}"
-XNU_VERSION="${XNU_VERSION:-7195.81.3}"
+# Version arrays - try multiple versions since Apple Open Source availability varies
+LIBC_VERSIONS=("1583.100.7" "1506.100.13" "1439.141.1" "1353.100.2")
+LIBDISPATCH_VERSIONS=("1462.0.4" "1412.0.4" "1271.120.2" "1173.100.2")
+LIBXPC_VERSIONS=("2235.120.27" "1336.261.2" "1205.70.9")
+LAUNCHD_VERSIONS=("2038.120.1" "1336.261.2" "1205.70.9" "842.92.1")
+DYLD_VERSIONS=("1125.2" "1042.1" "955.6" "852.2" "832.7.3" "750.6")
+CF_VERSIONS=("1858.112" "1775.118.101" "1677.104" "1575.19")
+XNU_VERSIONS=("10063.141.1" "8792.81.2" "8020.140.41" "7195.141.2" "7195.81.3")
+
+# Use specific release tag for swift-corelibs
+SWIFT_RELEASE_TAG="${SWIFT_RELEASE_TAG:-swift-5.9.2-RELEASE}"
 
 # Directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,47 +100,73 @@ create_directories() {
 
 download_apple_source() {
     local name=$1
-    local version=$2
-    local url="https://opensource.apple.com/tarballs/${name}/${name}-${version}.tar.gz"
-    local dest="$SOURCES_DIR/${name}-${version}.tar.gz"
+    shift
+    local versions=("$@")
     
-    if [[ -f "$dest" ]]; then
-        log_info "$name-$version already downloaded"
-        return 0
-    fi
+    for version in "${versions[@]}"; do
+        local url="https://opensource.apple.com/tarballs/${name}/${name}-${version}.tar.gz"
+        local dest="$SOURCES_DIR/${name}-${version}.tar.gz"
+        
+        if [[ -f "$dest" ]]; then
+            log_info "$name-$version already downloaded"
+            echo "$version"
+            return 0
+        fi
+        
+        log_info "Trying $name-$version..."
+        if curl -fSL -o "$dest" "$url" 2>/dev/null; then
+            log_success "Downloaded $name-$version"
+            echo "$version"
+            return 0
+        fi
+    done
     
-    log_info "Downloading $name-$version..."
-    if curl -fSL -o "$dest" "$url" 2>/dev/null; then
-        log_success "Downloaded $name-$version"
-        return 0
-    else
-        log_warn "Failed to download $name-$version from Apple Open Source"
-        return 1
-    fi
+    log_warn "Failed to download $name from Apple Open Source (tried ${#versions[@]} versions)"
+    return 1
 }
 
 download_all_sources() {
     log_info "Downloading all Apple Open Source tarballs..."
     
-    download_apple_source "xnu" "$XNU_VERSION" || true
-    download_apple_source "Libc" "$LIBC_VERSION" || true
-    download_apple_source "libdispatch" "$LIBDISPATCH_VERSION" || true
-    download_apple_source "libxpc" "$LIBXPC_VERSION" || true
-    download_apple_source "launchd" "$LAUNCHD_VERSION" || true
-    download_apple_source "dyld" "$DYLD_VERSION" || true
-    download_apple_source "CF" "$CF_VERSION" || true
+    XNU_VERSION=$(download_apple_source "xnu" "${XNU_VERSIONS[@]}") || true
+    LIBC_VERSION=$(download_apple_source "Libc" "${LIBC_VERSIONS[@]}") || true
+    LIBDISPATCH_VERSION=$(download_apple_source "libdispatch" "${LIBDISPATCH_VERSIONS[@]}") || true
+    LIBXPC_VERSION=$(download_apple_source "libxpc" "${LIBXPC_VERSIONS[@]}") || true
+    LAUNCHD_VERSION=$(download_apple_source "launchd" "${LAUNCHD_VERSIONS[@]}") || true
+    DYLD_VERSION=$(download_apple_source "dyld" "${DYLD_VERSIONS[@]}") || true
+    CF_VERSION=$(download_apple_source "CF" "${CF_VERSIONS[@]}") || true
     
     log_success "Downloads complete"
+    log_info "Available versions:"
+    [[ -n "$XNU_VERSION" ]] && log_info "  XNU: $XNU_VERSION"
+    [[ -n "$LIBC_VERSION" ]] && log_info "  Libc: $LIBC_VERSION"
+    [[ -n "$LIBDISPATCH_VERSION" ]] && log_info "  libdispatch: $LIBDISPATCH_VERSION"
+    [[ -n "$LIBXPC_VERSION" ]] && log_info "  libxpc: $LIBXPC_VERSION"
+    [[ -n "$LAUNCHD_VERSION" ]] && log_info "  launchd: $LAUNCHD_VERSION"
+    [[ -n "$DYLD_VERSION" ]] && log_info "  dyld: $DYLD_VERSION"
+    [[ -n "$CF_VERSION" ]] && log_info "  CF: $CF_VERSION"
 }
 
 extract_source() {
     local name=$1
     local version=$2
+    
+    # If version not provided, try to find it
+    if [[ -z "$version" ]]; then
+        local tarball=$(ls -1 "$SOURCES_DIR/${name}"-*.tar.gz 2>/dev/null | head -1)
+        if [[ -z "$tarball" ]]; then
+            log_error "No tarball found for $name"
+            return 1
+        fi
+        version=$(basename "$tarball" .tar.gz | sed "s/${name}-//")
+    fi
+    
     local tarball="$SOURCES_DIR/${name}-${version}.tar.gz"
     local dest="$SOURCES_DIR/${name}-${version}"
     
     if [[ -d "$dest" ]]; then
         log_info "$name-$version already extracted"
+        echo "$dest"
         return 0
     fi
     
@@ -149,6 +178,7 @@ extract_source() {
     log_info "Extracting $name-$version..."
     tar xzf "$tarball" -C "$SOURCES_DIR"
     log_success "Extracted $name-$version"
+    echo "$dest"
 }
 
 # =============================================================================
@@ -163,8 +193,9 @@ build_libdispatch() {
     
     # Prefer Swift open-source version for portability
     if [[ ! -d "$src_dir" ]]; then
-        log_info "Cloning swift-corelibs-libdispatch..."
-        git clone --depth 1 https://github.com/apple/swift-corelibs-libdispatch.git "$src_dir"
+        log_info "Cloning swift-corelibs-libdispatch (tag: $SWIFT_RELEASE_TAG)..."
+        git clone --depth 1 --branch "$SWIFT_RELEASE_TAG" \
+            https://github.com/apple/swift-corelibs-libdispatch.git "$src_dir"
     fi
     
     if ! check_cmake; then
@@ -182,7 +213,8 @@ build_libdispatch() {
         -DCMAKE_OSX_ARCHITECTURES="$TARGET_ARCH" \
         -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$SYSROOT_DIR/usr"
+        -DCMAKE_INSTALL_PREFIX="$SYSROOT_DIR/usr" \
+        -DENABLE_SWIFT=OFF
     
     log_info "Building libdispatch..."
     make -j"$JOBS"
@@ -201,13 +233,20 @@ build_corefoundation() {
     
     # Use Swift open-source version
     if [[ ! -d "$src_dir" ]]; then
-        log_info "Cloning swift-corelibs-foundation..."
-        git clone --depth 1 https://github.com/apple/swift-corelibs-foundation.git "$src_dir"
+        log_info "Cloning swift-corelibs-foundation (tag: $SWIFT_RELEASE_TAG)..."
+        git clone --depth 1 --branch "$SWIFT_RELEASE_TAG" \
+            https://github.com/apple/swift-corelibs-foundation.git "$src_dir"
     fi
     
-    local cf_src="$src_dir/Sources/CoreFoundation"
+    # Try to find CoreFoundation sources
+    local cf_src=""
+    if [[ -d "$src_dir/Sources/CoreFoundation" ]]; then
+        cf_src="$src_dir/Sources/CoreFoundation"
+    elif [[ -d "$src_dir/CoreFoundation" ]]; then
+        cf_src="$src_dir/CoreFoundation"
+    fi
     
-    if [[ -f "$cf_src/CMakeLists.txt" ]]; then
+    if [[ -n "$cf_src" ]] && [[ -f "$cf_src/CMakeLists.txt" ]]; then
         if check_cmake; then
             mkdir -p "$build_dir"
             cd "$build_dir"
@@ -223,10 +262,10 @@ build_corefoundation() {
             make -j"$JOBS" || log_warn "CoreFoundation build had errors"
         fi
     else
-        log_warn "CoreFoundation requires Swift build system"
+        log_warn "CoreFoundation CMakeLists.txt not found"
         log_info "Copying headers only..."
         mkdir -p "$SYSROOT_DIR/usr/include/CoreFoundation"
-        find "$cf_src" -name "*.h" -exec cp {} "$SYSROOT_DIR/usr/include/CoreFoundation/" \; 2>/dev/null || true
+        find "$src_dir" -name "*.h" -path "*CoreFoundation*" -exec cp {} "$SYSROOT_DIR/usr/include/CoreFoundation/" \; 2>/dev/null || true
     fi
     
     log_success "CoreFoundation setup complete"
@@ -235,12 +274,11 @@ build_corefoundation() {
 build_launchd() {
     log_info "Building launchd..."
     
-    extract_source "launchd" "$LAUNCHD_VERSION" || {
+    local src_dir=$(extract_source "launchd" "") || {
         log_error "launchd source not available"
         return 1
     }
     
-    local src_dir="$SOURCES_DIR/launchd-$LAUNCHD_VERSION"
     cd "$src_dir"
     
     # Check for build system
@@ -272,12 +310,11 @@ build_launchd() {
 build_dyld() {
     log_info "Building dyld..."
     
-    extract_source "dyld" "$DYLD_VERSION" || {
+    local src_dir=$(extract_source "dyld" "") || {
         log_error "dyld source not available"
         return 1
     }
     
-    local src_dir="$SOURCES_DIR/dyld-$DYLD_VERSION"
     cd "$src_dir"
     
     if ls *.xcodeproj 1> /dev/null 2>&1; then
@@ -286,7 +323,7 @@ build_dyld() {
         xcodebuild -list || true
         
         xcodebuild -project dyld.xcodeproj \
-            -scheme dyld \
+            -alltargets \
             -configuration Release \
             ARCHS="$TARGET_ARCH" \
             SDKROOT=macosx \
