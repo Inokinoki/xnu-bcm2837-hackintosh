@@ -79,6 +79,52 @@ Userland/
 | dyld | 🔴 Not Started | Required for dynamic linking |
 | CoreFoundation | 🔴 Not Started | Many userland deps |
 
+## Automated Builds
+
+### CI/CD
+
+This project uses GitHub Actions to test building userland components. See:
+
+- **Workflow**: [`.github/workflows/userland-build.yml`](../.github/workflows/userland-build.yml)
+- **Status**: Check the Actions tab for build results
+
+The CI builds use:
+- macOS runners with Xcode
+- Swift open-source versions where available (better portability)
+- ARM64 target architecture
+
+### Build Script
+
+A helper script is provided for local builds:
+
+```bash
+# Build all components
+./scripts/build-userland.sh
+
+# Build specific component
+./scripts/build-userland.sh libdispatch
+./scripts/build-userland.sh launchd
+
+# Download sources only
+./scripts/build-userland.sh --download
+
+# Clean build directories
+./scripts/build-userland.sh --clean
+
+# Show help
+./scripts/build-userland.sh --help
+```
+
+#### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SOURCES_DIR` | `./sources` | Source download directory |
+| `BUILD_DIR` | `./build` | Build output directory |
+| `SYSROOT_DIR` | `./sysroot` | Install sysroot directory |
+| `TARGET_ARCH` | `arm64` | Target architecture |
+| `JOBS` | auto | Parallel build jobs |
+
 ## Contributing
 
 If you successfully build any of these components, please contribute your patches and build instructions!
