@@ -45,7 +45,9 @@ Before building the userland, ensure you have:
 
 ## Source Availability
 
-All Darwin userland components are available from Apple's Open Source portal:
+All Darwin userland components are available from Apple's Open Source portal.
+
+> 📋 **See [UTILITIES.md](UTILITIES.md) for a complete list of 79+ available components!**
 
 ### Core Components
 
@@ -92,6 +94,7 @@ When cross-compiling for ARM64 (Raspberry Pi 3), you'll need to:
 ```
 Userland/
 ├── README.md              # This file
+├── UTILITIES.md           # Complete list of 79+ available utilities
 │
 ├── # Core Components
 ├── Libc.md                # C library build instructions
@@ -104,11 +107,16 @@ Userland/
 ├── # Command-Line Utilities
 ├── shell_cmds.md          # Shell commands (echo, pwd, etc.)
 ├── file_cmds.md           # File commands (ls, cp, mv, etc.)
+├── text_cmds.md           # Text commands (cat, head, sort, etc.)
 ├── system_cmds.md         # System commands (dmesg, sysctl, etc.)
 ├── network_cmds.md        # Network commands (ifconfig, ping, etc.)
 ├── diskdev_cmds.md        # Disk commands (mount, fsck, etc.)
 │
+├── # Shells
+├── bash.md                # Bash shell
+│
 ├── # System Daemons
+├── configd.md             # System configuration daemon
 ├── mDNSResponder.md       # Bonjour/mDNS daemon
 └── Security.md            # Security framework
 ```

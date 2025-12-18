@@ -412,6 +412,7 @@ jobs:
           
           required_files=(
             "Userland/README.md"
+            "Userland/UTILITIES.md"
             "Userland/launchd.md"
             "Userland/libdispatch.md"
             "Userland/libxpc.md"
@@ -423,8 +424,11 @@ jobs:
             "Userland/system_cmds.md"
             "Userland/network_cmds.md"
             "Userland/diskdev_cmds.md"
+            "Userland/text_cmds.md"
             "Userland/mDNSResponder.md"
             "Userland/Security.md"
+            "Userland/configd.md"
+            "Userland/bash.md"
           )
           
           all_ok=true
