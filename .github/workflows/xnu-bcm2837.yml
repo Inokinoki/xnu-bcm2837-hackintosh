@@ -104,7 +104,7 @@ jobs:
             OBJROOT="$RUNNER_TEMP/firehose.obj" SYMROOT="$RUNNER_TEMP/firehose.sym" DSTROOT="$DSTROOT"
           LIB=$(find "$DSTROOT" -name 'libfirehose_kernel.a' | head -1)
           test -f "$LIB"
-          echo "LDFLAGS_KERNEL_SDK=-L$(dirname "$LIB")" >> "$GITHUB_ENV"
+          echo "FIREHOSE_LIB_DIR=$(dirname "$LIB")" >> "$GITHUB_ENV"
           lipo -info "$LIB" || true
 
       - name: Apply BCM2837 patches
@@ -147,6 +147,7 @@ jobs:
           make $MAKEFLAGS_EXTRA SDKROOT=macosx \
             ARCH_CONFIGS=ARM64 MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS="$KERNEL_CONFIG" \
             BUILD_WERROR=0 DO_CTFMERGE=0 MIG="$MIG" MIGCOM="$MIGCOM" \
+            LDFLAGS_KERNEL_SDK="-L$FIREHOSE_LIB_DIR" \
             2>&1 | tee "$RUNNER_TEMP/build.log"
 
       - name: Collect kernel
