@@ -1,0 +1,57 @@
+diff --git a/osfmk/vm/vm_map.c b/osfmk/vm/vm_map.c
+index 436bd93..b4ca5ac 100644
+--- a/osfmk/vm/vm_map.c
++++ b/osfmk/vm/vm_map.c
+@@ -1294,7 +1294,7 @@ vm_map_create_options(
+ 	result->size = 0;
+ 	result->user_wire_limit = MACH_VM_MAX_ADDRESS;  /* default limit is unlimited */
+ 	result->user_wire_size  = 0;
+-#if XNU_TARGET_OS_OSX
++#if XNU_TARGET_OS_OSX && !CONFIG_EMBEDDED
+ 	result->vmmap_high_start = 0;
+ #endif
+ 	os_ref_init_count(&result->map_refcnt, &map_refgrp, 1);
+@@ -2701,13 +2701,13 @@ StartAgain:;
+ 			}
+ 			start = *address;
+ 		}
+-#if XNU_TARGET_OS_OSX
++#if XNU_TARGET_OS_OSX && !CONFIG_EMBEDDED
+ 		else if ((start == 0 || start == vm_map_min(map)) &&
+ 		    !map->disable_vmentry_reuse &&
+ 		    map->vmmap_high_start != 0) {
+ 			start = map->vmmap_high_start;
+ 		}
+-#endif /* XNU_TARGET_OS_OSX */
++#endif /* XNU_TARGET_OS_OSX && !CONFIG_EMBEDDED */
+ 
+ 
+ 		/*
+@@ -20127,7 +20127,8 @@ kern_return_t
+ vm_map_cs_wx_enable(
+ 	vm_map_t map)
+ {
+-	return pmap_cs_allow_invalid(vm_map_pmap(map));
++	/* BCM2837: the arm64 pmap has no pmap_cs, so there is nothing to allow. */
++	return KERN_SUCCESS;
+ }
+ 
+ void
+@@ -20987,7 +20988,7 @@ vm_commit_pagezero_status(vm_map_t lmap)
+ 	pmap_advise_pagezero_range(lmap->pmap, lmap->min_offset);
+ }
+ 
+-#if XNU_TARGET_OS_OSX
++#if XNU_TARGET_OS_OSX && !CONFIG_EMBEDDED
+ void
+ vm_map_set_high_start(
+ 	vm_map_t        map,
+@@ -20995,7 +20996,7 @@ vm_map_set_high_start(
+ {
+ 	map->vmmap_high_start = high_start;
+ }
+-#endif /* XNU_TARGET_OS_OSX */
++#endif /* XNU_TARGET_OS_OSX && !CONFIG_EMBEDDED */
+ 
+ 
+ /*

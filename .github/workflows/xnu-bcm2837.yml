@@ -1,0 +1,154 @@
+name: xnu-bcm2837
+
+# Builds xnu-7195.81.3 for the Raspberry Pi 3 (BCM2837) machine config with the
+# patches in xnu/patches/, on a macOS runner (the kernel needs Apple's toolchain).
+# Optional QEMU boot test: qemu-system-aarch64 -M raspi3b, see the qemu_boot job.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_config:
+        description: RELEASE / DEVELOPMENT
+        default: DEVELOPMENT
+      keep_going:
+        description: make -k (collect every compile error in one run)
+        default: "true"
+      qemu_boot:
+        description: Also boot the kernel in QEMU raspi3b (needs a bootable payload, see docs)
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "xnu/patches/**"
+      - ".github/workflows/xnu-bcm2837.yml"
+
+concurrency:
+  group: xnu-bcm2837-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XNU_REPO: https://github.com/apple-oss-distributions/xnu.git
+  # xnu-7195.81.3 (README pin). Verified locally: tag resolves to this commit.
+  XNU_SHA: e890dd3c5b68b2b8f7c726c8812e74cc347cb0ba
+  BOOTSTRAP_REPO: https://github.com/apple-oss-distributions/bootstrap_cmds.git
+  # bootstrap_cmds-121 is the mig release shipped with macOS 11.0.1 (xnu-7195.50.7.100.1).
+  BOOTSTRAP_TAG: bootstrap_cmds-121
+  KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
+
+jobs:
+  build:
+    # macOS 13 runners ship Xcode 14.x. xnu-7195 predates the Xcode 15/16 changes
+    # that broke xnu-8796 (see ios-sweet's xnu.yml). Not yet verified on CI.
+    runs-on: macos-13
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest installed Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+
+      - name: Fetch xnu at the pinned commit
+        run: |
+          git init -q xnu-src
+          git -C xnu-src fetch -q --depth 1 "$XNU_REPO" "$XNU_SHA"
+          git -C xnu-src checkout -q FETCH_HEAD
+          test "$(git -C xnu-src rev-parse HEAD)" = "$XNU_SHA"
+
+      - name: Apply BCM2837 patches
+        run: |
+          cd xnu-src
+          for p in "$GITHUB_WORKSPACE"/xnu/patches/*.patch; do
+            echo "== $(basename "$p")"
+            git apply --verbose "$p"
+          done
+          git diff --stat
+
+      - name: Build mig from bootstrap_cmds
+        run: |
+          git init -q bootstrap_cmds
+          git -C bootstrap_cmds fetch -q --depth 1 "$BOOTSTRAP_REPO" "refs/tags/$BOOTSTRAP_TAG"
+          git -C bootstrap_cmds checkout -q FETCH_HEAD
+          cd bootstrap_cmds
+          # the install script chowns to root:wheel, which needs sudo on the runner
+          sed -i '' 's|-o root -g wheel||g' xcodescripts/install-mig.sh
+          OBJROOT="$RUNNER_TEMP/mig.obj"; SYMROOT="$RUNNER_TEMP/mig.sym"; DSTROOT="$RUNNER_TEMP/mig.dst"
+          xcodebuild install -sdk macosx -project mig.xcodeproj ARCHS="arm64 x86_64" \
+            CODE_SIGN_IDENTITY="-" OBJROOT="$OBJROOT" SYMROOT="$SYMROOT" DSTROOT="$DSTROOT" \
+            RC_ProjectNameAndSourceVersion="$BOOTSTRAP_TAG"
+          MIG=$(find "$DSTROOT" -type f -name mig | head -1)
+          MIGCOM=$(find "$DSTROOT" -type f -name migcom | head -1)
+          test -x "$MIG" && test -x "$MIGCOM"
+          echo "MIG=$MIG" >> "$GITHUB_ENV"
+          echo "MIGCOM=$MIGCOM" >> "$GITHUB_ENV"
+          "$MIG" -version 2>&1 | head -1 || true
+
+      - name: Build kernel
+        working-directory: xnu-src
+        env:
+          MAKEFLAGS_EXTRA: ${{ inputs.keep_going == 'false' && '' || '-k' }}
+        run: |
+          set -o pipefail
+          # ARCH/MACHINE/KERNEL config names as in xnu's makedefs/MakeInc.top.
+          # BUILD_WERROR=0: the 2020-era code is not warning-clean with the newer clang.
+          # DO_CTFMERGE=0: skip CTF merging (ctfconvert is not in Xcode).
+          make $MAKEFLAGS_EXTRA SDKROOT=macosx \
+            ARCH_CONFIGS=ARM64 MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS="$KERNEL_CONFIG" \
+            BUILD_WERROR=0 DO_CTFMERGE=0 MIG="$MIG" MIGCOM="$MIGCOM" \
+            2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Collect kernel
+        if: always()
+        run: |
+          mkdir -p out
+          cp "$RUNNER_TEMP/build.log" out/ 2>/dev/null || true
+          find xnu-src/BUILD -type f -name 'kernel.*bcm2837' -exec cp {} out/ \; || true
+          ls -la out
+          (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xnu-bcm2837-kernel
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
+
+  qemu_boot:
+    # Off by default. Enable with the qemu_boot input once a bootable payload exists:
+    # Phase 2 (a loader that turns the xnu Mach-O into a Pi kernel8.img) is not done.
+    if: inputs.qemu_boot == true
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: xnu-bcm2837-kernel
+          path: out
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-system-arm
+          qemu-system-aarch64 -M help | grep -i raspi3b
+
+      - name: Boot kernel on raspi3b
+        run: |
+          KERNEL=$(ls out/kernel.* | grep -v SHA256 | head -1)
+          # raspi3b: PL011 is serial0 (ttyAMA0). The kernel's Pi 3 driver uses the
+          # mini UART (AUX), which QEMU exposes as serial1: capture both.
+          timeout 120 qemu-system-aarch64 -M raspi3b -cpu cortex-a53 -m 1G \
+            -kernel "$KERNEL" -display none \
+            -serial file:uart0.log -serial file:uart1.log -no-reboot || true
+          echo "--- uart0 (PL011)"; tail -40 uart0.log || true
+          echo "--- uart1 (mini UART, what the kernel uses)"; tail -40 uart1.log || true
+          # Pass only if the kernel prints its banner on the mini UART.
+          grep -q "Darwin Kernel Version" uart1.log uart0.log
