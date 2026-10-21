@@ -88,7 +88,24 @@ jobs:
           mkdir -p "$INC/os" "$INC/dispatch"
           cp libdispatch/os/*.h "$INC/os/"
           cp libdispatch/dispatch/*.h "$INC/dispatch/"
-          echo "LIBDISPATCH_INCFLAGS=-I$INC" >> "$GITHUB_ENV"
+          # OS_FIREHOSE_SPI gates the kernel side of os/firehose_buffer_private.h
+          echo "LIBDISPATCH_INCFLAGS=-I$INC -DOS_FIREHOSE_SPI=1" >> "$GITHUB_ENV"
+
+      - name: Build libfirehose_kernel from libdispatch
+        run: |
+          cd libdispatch
+          DSTROOT="$RUNNER_TEMP/firehose.dst"
+          # The xcconfig points headers at the SDK's usr/local, which this SDK lacks:
+          # use the libdispatch sources directly and build the arm64 kernel archive.
+          xcodebuild install -project libdispatch.xcodeproj -target libfirehose_kernel \
+            -sdk macosx ARCHS=arm64 VALID_ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="-" \
+            HEADER_SEARCH_PATHS="$PWD $PWD/os $RUNNER_TEMP/libdispatch-inc" \
+            OBJROOT="$RUNNER_TEMP/firehose.obj" SYMROOT="$RUNNER_TEMP/firehose.sym" DSTROOT="$DSTROOT"
+          LIB=$(find "$DSTROOT" -name 'libfirehose_kernel.a' | head -1)
+          test -f "$LIB"
+          echo "LDFLAGS_KERNEL_SDK=-L$(dirname "$LIB")" >> "$GITHUB_ENV"
+          lipo -info "$LIB" || true
 
       - name: Apply BCM2837 patches
         run: |
