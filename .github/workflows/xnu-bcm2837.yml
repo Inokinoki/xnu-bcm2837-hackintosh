@@ -34,6 +34,10 @@ env:
   BOOTSTRAP_REPO: https://github.com/apple-oss-distributions/bootstrap_cmds.git
   # bootstrap_cmds-121 is the mig release shipped with macOS 11.0.1 (xnu-7195.50.7.100.1).
   BOOTSTRAP_TAG: bootstrap_cmds-121
+  # availability.pl (used by bsd/sys/make_symbol_aliasing.sh) is not in the SDK.
+  AV_REPO: https://github.com/apple-oss-distributions/AvailabilityVersions.git
+  AV_TAG: AvailabilityVersions-69.2
+  AV_SHA: c7eca501771164b744ec1993344d21e9b6f30dfd
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
 
 jobs:
@@ -60,6 +64,15 @@ jobs:
           git -C xnu-src fetch -q --depth 1 "$XNU_REPO" "$XNU_SHA"
           git -C xnu-src checkout -q FETCH_HEAD
           test "$(git -C xnu-src rev-parse HEAD)" = "$XNU_SHA"
+
+      - name: Fetch availability.pl at the pinned commit
+        run: |
+          git init -q av
+          git -C av fetch -q --depth 1 "$AV_REPO" "refs/tags/$AV_TAG"
+          git -C av checkout -q FETCH_HEAD
+          test "$(git -C av rev-parse HEAD)" = "$AV_SHA"
+          install -m 755 av/availability.pl "$RUNNER_TEMP/availability.pl"
+          echo "AVAILABILITY_PL=$RUNNER_TEMP/availability.pl" >> "$GITHUB_ENV"
 
       - name: Apply BCM2837 patches
         run: |
