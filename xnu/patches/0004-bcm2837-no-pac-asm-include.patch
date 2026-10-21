@@ -1,0 +1,13 @@
+diff --git a/osfmk/arm64/exception_asm.h b/osfmk/arm64/exception_asm.h
+index 18fd6df..30b4ba8 100644
+--- a/osfmk/arm64/exception_asm.h
++++ b/osfmk/arm64/exception_asm.h
+@@ -26,7 +26,7 @@
+  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+  */
+ 
+-#include <arm64/pac_asm.h>
++// #include <arm64/pac_asm.h>	/* not in the open-source drop; only used under HAS_APPLE_PAC */
+ #include <pexpert/arm64/board_config.h>
+ #include "assym.s"
+ 

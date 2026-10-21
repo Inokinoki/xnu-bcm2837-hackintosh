@@ -1,0 +1,16 @@
+diff --git a/iokit/Kernel/IOPMrootDomain.cpp b/iokit/Kernel/IOPMrootDomain.cpp
+index ed78c3d..d206942 100644
+--- a/iokit/Kernel/IOPMrootDomain.cpp
++++ b/iokit/Kernel/IOPMrootDomain.cpp
+@@ -4080,9 +4080,9 @@ IOPMrootDomain::willNotifyPowerChildren( IOPMPowerStateIndex newPowerState )
+ 			updateTasksSuspend();
+ 
+ 			clock_interval_to_deadline(10, kSecondScale, &deadline);
+-#if defined(XNU_TARGET_OS_OSX)
++#if defined(XNU_TARGET_OS_OSX) && !CONFIG_EMBEDDED
+ 			vm_pageout_wait(AbsoluteTime_to_scalar(&deadline));
+-#endif /* defined(XNU_TARGET_OS_OSX) */
++#endif /* defined(XNU_TARGET_OS_OSX) && !CONFIG_EMBEDDED */
+ 		}
+ 
+ 		_aotReadyToFullWake = false;
