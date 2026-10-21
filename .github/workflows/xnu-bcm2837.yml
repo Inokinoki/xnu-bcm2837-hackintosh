@@ -38,6 +38,10 @@ env:
   AV_REPO: https://github.com/apple-oss-distributions/AvailabilityVersions.git
   AV_TAG: AvailabilityVersions-69.2
   AV_SHA: c7eca501771164b744ec1993344d21e9b6f30dfd
+  # libdispatch-1271.40.12 (macOS 11.0.1 manifest): firehose headers for the kernel.
+  LD_REPO: https://github.com/apple-oss-distributions/libdispatch.git
+  LD_TAG: libdispatch-1271.40.12
+  LD_SHA: df1a20f0926bdda255d019b04b0a771df66448fa
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
 
 jobs:
@@ -73,6 +77,18 @@ jobs:
           test "$(git -C av rev-parse HEAD)" = "$AV_SHA"
           install -m 755 av/availability.pl "$RUNNER_TEMP/availability.pl"
           echo "AVAILABILITY_PL=$RUNNER_TEMP/availability.pl" >> "$GITHUB_ENV"
+
+      - name: Stage libdispatch headers (firehose)
+        run: |
+          git init -q libdispatch
+          git -C libdispatch fetch -q --depth 1 "$LD_REPO" "refs/tags/$LD_TAG"
+          git -C libdispatch checkout -q FETCH_HEAD
+          test "$(git -C libdispatch rev-parse HEAD)" = "$LD_SHA"
+          INC="$RUNNER_TEMP/libdispatch-inc"
+          mkdir -p "$INC/os" "$INC/dispatch"
+          cp libdispatch/os/*.h "$INC/os/"
+          cp libdispatch/dispatch/*.h "$INC/dispatch/"
+          echo "LIBDISPATCH_INCFLAGS=-I$INC" >> "$GITHUB_ENV"
 
       - name: Apply BCM2837 patches
         run: |

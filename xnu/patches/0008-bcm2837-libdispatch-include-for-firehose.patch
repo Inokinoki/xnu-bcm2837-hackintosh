@@ -1,0 +1,13 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -791,7 +791,9 @@
+ INCFLAGS_EXTERN	= -I$(SRCROOT)/EXTERNAL_HEADERS
+ INCFLAGS_GEN	= -I$(SRCROOT)/$(COMPONENT) -I$(OBJROOT)/EXPORT_HDRS/$(COMPONENT)
+ INCFLAGS_LOCAL	= -I.
+-INCFLAGS_SDK	= -I$(SDKROOT)/usr/local/include/kernel
++INCFLAGS_SDK	= -I$(SDKROOT)/usr/local/include/kernel $(LIBDISPATCH_INCFLAGS)
++# BCM2837/CI: libfirehose headers (os/firehose_buffer_private.h) come from libdispatch,
++# which the SDK does not ship. CI sets LIBDISPATCH_INCFLAGS to a staged copy.
+ 
+ INCFLAGS	= $(INCFLAGS_LOCAL) $(INCFLAGS_GEN) $(INCFLAGS_IMPORT) $(INCFLAGS_EXTERN) $(INCFLAGS_MAKEFILE) $(INCFLAGS_SDK)
+ 
