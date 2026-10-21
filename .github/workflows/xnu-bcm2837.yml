@@ -38,9 +38,10 @@ env:
 
 jobs:
   build:
-    # macOS 13 runners ship Xcode 14.x. xnu-7195 predates the Xcode 15/16 changes
-    # that broke xnu-8796 (see ios-sweet's xnu.yml). Not yet verified on CI.
-    runs-on: macos-13
+    # macos-13 never got a runner (job stayed queued), so use macos-14 (Xcode 15.x).
+    # xnu-7195 predates the Xcode 16 changes that broke xnu-8796 (see ios-sweet's
+    # xnu.yml). Not yet verified on CI.
+    runs-on: macos-14
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
