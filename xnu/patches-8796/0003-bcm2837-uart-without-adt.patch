@@ -1,0 +1,47 @@
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+index 997a4ab..9917300 100644
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -769,6 +769,21 @@ serial_init(void)
+ 		return 1;
+ 	}
+ 
++#ifdef PI3_UART
++	/*
++	 * Raspberry Pi 3: the firmware passes a DTB, not an ADT, so there is no
++	 * arm-io node to look the peripherals up in. BCM283x peripherals are at
++	 * physical 0x3F000000; GPIO and the mini UART (AUX) have fixed offsets.
++	 * The mini UART baud divisor (270 in pi3_uart_init) assumes a 250 MHz
++	 * core clock: keep core_freq=250 in config.txt.
++	 */
++	pi3_gpio_base_vaddr = ml_io_map(0x3F200000, 0x1000);
++	pi3_aux_base_vaddr = ml_io_map(0x3F215000, 0x1000);
++	register_serial_functions(&pi3_uart_serial_functions);
++	pi3_uart_init();
++	return 1;
++#endif /* PI3_UART */
++
+ 	soc_base = pe_arm_get_soc_base_phys();
+ 
+ 	if (soc_base == 0) {
+@@ -777,20 +792,6 @@ serial_init(void)
+ 
+ 	PE_parse_boot_argn("disable-uart-irq", &disable_uart_irq, sizeof(disable_uart_irq));
+ 
+-#ifdef PI3_UART
+-	if (SecureDTFindEntry("name", "gpio", &entryP) == kSuccess) {
+-		SecureDTGetProperty(entryP, "reg", (void const **)&reg_prop, &prop_size);
+-		pi3_gpio_base_vaddr = ml_io_map(soc_base + *reg_prop, *(reg_prop + 1));
+-	}
+-	if (SecureDTFindEntry("name", "aux", &entryP) == kSuccess) {
+-		SecureDTGetProperty(entryP, "reg", (void const **)&reg_prop, &prop_size);
+-		pi3_aux_base_vaddr = ml_io_map(soc_base + *reg_prop, *(reg_prop + 1));
+-	}
+-	if ((pi3_gpio_base_vaddr != 0) && (pi3_aux_base_vaddr != 0)) {
+-		register_serial_functions(&pi3_uart_serial_functions);
+-	}
+-#endif /* PI3_UART */
+-
+ #ifdef VMAPPLE_UART
+ 	if (SecureDTFindEntry("name", "uart0", &entryP) == kSuccess) {
+ 		SecureDTGetProperty(entryP, "reg", (void const **)&reg_prop, &prop_size);
