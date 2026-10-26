@@ -1,8 +1,6 @@
-diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
-index fc2096f..648b9cb 100644
 --- a/osfmk/arm/pmap/pmap.c
 +++ b/osfmk/arm/pmap/pmap.c
-@@ -4676,8 +4676,9 @@ pmap_page_protect_options_with_flush_range(
+@@ -4676,8 +4676,9 @@
  			}
  #endif
  			if (remove && (options & PMAP_OPTIONS_COMPRESSOR)) {
@@ -14,48 +12,3 @@ index fc2096f..648b9cb 100644
  			}
  			goto protect_skip_pve_pass1;
  		}
-@@ -5816,6 +5817,8 @@ pmap_construct_pte(
- 	return pte;
- }
- 
-+MARK_AS_PMAP_TEXT static void pmap_phys_write_disable(vm_address_t va);
-+
- MARK_AS_PMAP_TEXT kern_return_t
- pmap_enter_options_internal(
- 	pmap_t pmap,
-@@ -10977,11 +10980,14 @@ static_assert((_COMM_PAGE32_BASE_ADDRESS & ~ARM_TT_L2_OFFMASK) >= VM_MAX_ADDRESS
-  */
- 
- #elif (ARM_PGSHIFT == 12)
-+#if !defined(ARM64_BOARD_CONFIG_BCM2837)
- /**
-  * Ensure that 64-bit devices using 4K pages can nest the commpage completely
-- * above the maximum userspace VA.
-+ * above the maximum userspace VA. BCM2837 (Raspberry Pi 3) does not meet this
-+ * with its 1 GiB RAM layout; the nested commpage path is not verified on it yet.
-  */
- static_assert((_COMM_PAGE64_BASE_ADDRESS & ~ARM_TT_L1_OFFMASK) >= MACH_VM_MAX_ADDRESS);
-+#endif /* !ARM64_BOARD_CONFIG_BCM2837 */
- #else
- #error Nested shared page mapping is unsupported on this config
- #endif
-@@ -11623,7 +11629,8 @@ pmap_cs_lockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
- #if XNU_MONITOR
- 	pmap_ppl_lockdown_pages(kva, size, PVH_FLAG_LOCKDOWN_CS, ppl_writable);
- #else
--	pmap_ppl_lockdown_pages(kva, size, 0, ppl_writable);
-+	/* BCM2837: no PPL, so nothing can lock pages down. */
-+	(void)kva; (void)size; (void)ppl_writable;
- #endif
- }
- 
-@@ -11633,7 +11640,8 @@ pmap_cs_unlockdown_pages(vm_address_t kva, vm_size_t size, bool ppl_writable)
- #if XNU_MONITOR
- 	pmap_ppl_unlockdown_pages(kva, size, PVH_FLAG_LOCKDOWN_CS, ppl_writable);
- #else
--	pmap_ppl_unlockdown_pages(kva, size, 0, ppl_writable);
-+	/* BCM2837: no PPL, so nothing can unlock pages. */
-+	(void)kva; (void)size; (void)ppl_writable;
- #endif
- }
- 
