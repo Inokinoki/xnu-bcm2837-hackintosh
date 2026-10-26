@@ -87,6 +87,8 @@ jobs:
           INC="$RUNNER_TEMP/libdispatch-inc"
           mkdir -p "$INC/os" "$INC/dispatch"
           cp libdispatch/os/*.h "$INC/os/"
+          # os/atomic_private.h is not in libdispatch or libplatform-254; xnu's libkern has it
+          cp xnu-src/libkern/os/atomic*.h "$INC/os/"
           cp libdispatch/dispatch/*.h "$INC/dispatch/"
           # OS_FIREHOSE_SPI gates the kernel side of os/firehose_buffer_private.h
           echo "LIBDISPATCH_INCFLAGS=-I$INC -DOS_FIREHOSE_SPI=1" >> "$GITHUB_ENV"
