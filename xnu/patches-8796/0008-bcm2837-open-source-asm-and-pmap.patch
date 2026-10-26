@@ -1,0 +1,16 @@
+diff --git a/config/MASTER.arm64.bcm2837 b/config/MASTER.arm64.bcm2837
+index 1ed75ee..a58684e 100644
+--- a/config/MASTER.arm64.bcm2837
++++ b/config/MASTER.arm64.bcm2837
+@@ -81,6 +81,11 @@ machine		"arm64"						# <arm64>
+ 
+ makeoptions	OSFMK_MACHINE = "arm64"				# <mach>
+ 
++# Apple's SoC configs link the arm64 asm and pmap from the closed KDK libs.
++# The Pi 3 has no such lib, so build the open-source versions.
++options   NOS_ARM_ASM			# <nos_arm_asm>
++options   NOS_ARM_PMAP			# <nos_arm_pmap>
++
+ options		COUNT_SYSCALLS		# count bsd system calls 	# <countcalls>
+ options     TRASH_VFP_ON_SAVE   # <debug,trash_vfp>
+ options		ALTERNATE_DEBUGGER	# <alternate_debugger>
