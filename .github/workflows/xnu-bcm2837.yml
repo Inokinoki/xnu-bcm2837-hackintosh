@@ -104,7 +104,7 @@ jobs:
           xcodebuild install -project libdispatch.xcodeproj -target libfirehose_kernel \
             -sdk macosx ARCHS=arm64 VALID_ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY="-" \
-            HEADER_SEARCH_PATHS="$PWD $PWD/os $RUNNER_TEMP/libdispatch-inc $CLANG_RESOURCE_INC "'$(SDKROOT)/System/Library/Frameworks/Kernel.framework/PrivateHeaders $(SDKROOT)/System/Library/Frameworks/Kernel.framework/Headers $(SDKROOT)/usr/include' \
+            HEADER_SEARCH_PATHS="$PWD $PWD/os $RUNNER_TEMP/libdispatch-inc $CLANG_RESOURCE_INC $GITHUB_WORKSPACE/xnu-src/osfmk $GITHUB_WORKSPACE/xnu-src/libkern "'$(SDKROOT)/System/Library/Frameworks/Kernel.framework/PrivateHeaders $(SDKROOT)/System/Library/Frameworks/Kernel.framework/Headers $(SDKROOT)/usr/include' \
             OBJROOT="$RUNNER_TEMP/firehose.obj" SYMROOT="$RUNNER_TEMP/firehose.sym" DSTROOT="$DSTROOT"
           LIB=$(find "$DSTROOT" -name 'libfirehose_kernel.a' | head -1)
           test -f "$LIB"
