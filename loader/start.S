@@ -10,6 +10,10 @@ _start:
 	and	x1, x1, #3
 	cbnz	x1, .Lpark
 
+	/* Pi 3 generic timer: 19.2 MHz (also written into the ADT timebase-frequency) */
+	ldr	x1, =19200000
+	msr	cntfrq_el0, x1
+
 	mrs	x1, CurrentEL
 	lsr	x1, x1, #2
 	cmp	x1, #3

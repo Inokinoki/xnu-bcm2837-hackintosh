@@ -11,6 +11,11 @@ matches the ADT layout used by ios-sweet's tools/adt.py:
 import struct
 
 
+BCM283X_PERIPH_BASE = 0x3F000000
+BCM283X_PERIPH_SIZE = 0x01000000
+TIMEBASE_HZ = 19200000
+
+
 class Node:
     def __init__(self, name):
         self.name = name
@@ -57,5 +62,21 @@ def build(dram_base, dram_size, cmdline=''):
 
     mmap = chosen.child('memory-map')
     mmap.prop('name', 'memory-map')
+
+    # pe_arm_get_soc_base_phys(): the SoC base is ranges[1] of arm-io (the parent
+    # address). Zero there disables the platform setup, including the timebase.
+    arm_io = root.child('arm-io')
+    arm_io.prop('name', 'arm-io')
+    arm_io.prop('device_type', 'arm-io')
+    arm_io.prop('ranges', struct.pack('<3Q', 0x0, BCM283X_PERIPH_BASE, BCM283X_PERIPH_SIZE))
+
+    # pe_identify_machine(): a running CPU supplies the timebase frequency.
+    cpus = root.child('cpus')
+    cpus.prop('name', 'cpus')
+    cpu0 = cpus.child('cpu0')
+    cpu0.prop('name', 'cpu0')
+    cpu0.prop('state', 'running')
+    cpu0.prop('reg', struct.pack('<I', 0))
+    cpu0.prop('timebase-frequency', struct.pack('<I', TIMEBASE_HZ))
 
     return serialize(root)
