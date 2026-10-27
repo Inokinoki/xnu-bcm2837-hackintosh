@@ -71,3 +71,22 @@ be a power of two; `tools/mkhfsroot.py DIR root.img --size 8M` makes a bootable 
 is tested (HFS mounts, init runs as PID 1); the write path (CMD24/25), the 4-bit bus, SD clock rates and
 real hardware are untested.
 
+## iOS 16 userland on QEMU
+
+`tools/mkios-root.sh DIR ios16-root.img 16G` builds an HFS+ root from the iPhone10,3 iOS 16.7.16 (20H392) IPSW
+images (OS 087-86698-044, SystemOS 087-86593-047, AppOS 087-86715-047 dmgs, e.g. fetched with
+`tools/remotezip.py`) in a privileged docker container (apfs-fuse, hfsprogs, rsync; see `tools/ios-root-docker/`).
+The image (about 12 GB used) stays out of git. Boot it as the SD card:
+
+```sh
+CMDLINE="debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress rd=sdroot0 unentitled_ios_sim_launch=1 ignition_level=1" \
+SDSNAPSHOT=1 SDIMG=ios16-root.img tools/pi3-qemu-boot.sh KERNEL 300
+```
+
+`unentitled_ios_sim_launch=1` lets the macOS-configured kernel run iOS binaries; `ignition_level=1` makes
+dyld use `/System/Library/Caches/com.apple.dyld` (the image has hard links there). Observed on QEMU `raspi3b`:
+Apple's launchd (Darwin Bootstrapper 7.0.0) maps the dyld shared cache (16K code signature pages are accepted,
+not verified, see xnu patch 0040), runs its boot tasks (fsck, mount, data protection, MSU, corecrypto FIPS self test),
+and stops at `keybagd`: the device tree has no `options` node and there is no AppleKeyStore. Not done: keybag,
+networking, SpringBoard; no hardware test. It is slow (QEMU TCG, minutes to the keybag step).
+
