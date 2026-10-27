@@ -1,6 +1,6 @@
 --- a/config/Private.arm64.exports
 +++ b/config/Private.arm64.exports
-@@ -75,47 +75,13 @@
+@@ -75,48 +75,13 @@
  _mach_bridge_init_timestamp
  _mach_bridge_set_params
  _vfs_resolver_result
@@ -45,9 +45,10 @@
 -__ZN26IOUnifiedAddressTranslator8taskDiedEv
 -__ZN26IOUnifiedAddressTranslator12commitUnmapsEv
 -__ZN26IOUnifiedAddressTranslator14prepareFWUnmapEyy
- __ZTV26IOUnifiedAddressTranslator
+-__ZTV26IOUnifiedAddressTranslator
  __ZN24IOBufferMemoryDescriptor18initWithGuardPagesEP4taskjy
  __ZN24IOBufferMemoryDescriptor20inTaskWithGuardPagesEP4taskjy
+ __ZN27IOGuardPageMemoryDescriptor12initWithSizeEm
 --- a/config/Private.arm64.MacOSX.exports
 +++ b/config/Private.arm64.MacOSX.exports
 @@ -1,26 +1,7 @@
