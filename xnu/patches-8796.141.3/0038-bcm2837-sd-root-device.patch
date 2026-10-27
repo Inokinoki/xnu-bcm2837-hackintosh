@@ -39,7 +39,7 @@ diff --git a/bsd/dev/bcm2837_sd.c b/bsd/dev/bcm2837_sd.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/bcm2837_sd.c
-@@ -0,0 +1,494 @@
+@@ -0,0 +1,498 @@
 +/*
 + * BCM2837 SD card root device (Raspberry Pi 3).
 + *
@@ -412,6 +412,10 @@ new file mode 100644
 +		return is_char ? ENODEV : (*f == SECSIZE ? 0 : EINVAL);
 +	case DKIOCGETBLOCKCOUNT:
 +		*o = sd.nblocks;
++		return 0;
++	case DKIOCSYNCHRONIZE:
++	case DKIOCSYNCHRONIZECACHE:
++		/* The card has no write cache we manage: strategy returns after the data is written. */
 +		return 0;
 +	case DKIOCISWRITABLE:
 +		*f = 1;

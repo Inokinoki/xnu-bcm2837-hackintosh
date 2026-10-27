@@ -8,6 +8,7 @@ matches the ADT layout used by ios-sweet's tools/adt.py:
   node = {u32 nprops, u32 nchildren, props..., children...}
   prop = {char name[32], u32 size (bit31 = placeholder), value padded to 4}
 """
+import hashlib
 import struct
 
 
@@ -65,6 +66,8 @@ def build(dram_base, dram_size, cmdline='', ramdisk=None):
     chosen.prop('boot-args', cmdline)
     # 64 bytes, filled by the loader from the Pi's RNG before the kernel runs
     chosen.prop('random-seed', b'\x01' * 64)
+    # mount -P 1 (launchd's mount boot task) requires /chosen/boot-manifest-hash (48 bytes, SHA-384)
+    chosen.prop('boot-manifest-hash', hashlib.sha384(b'bcm2837 boot manifest').digest())
 
     mmap = chosen.child('memory-map')
     mmap.prop('name', 'memory-map')
