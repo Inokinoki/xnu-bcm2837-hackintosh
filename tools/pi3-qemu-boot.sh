@@ -1,7 +1,7 @@
 #!/bin/sh
 # Boot an xnu-bcm2837 kernel on QEMU raspi3b through the loader.
 #
-#   [RAMDISK=image] [CMDLINE=...] tools/pi3-qemu-boot.sh KERNEL [SECONDS]
+#   [RAMDISK=image | SDIMG=image] [CMDLINE=...] tools/pi3-qemu-boot.sh KERNEL [SECONDS]
 #
 # Needs an aarch64 gcc (CC, default aarch64-linux-gnu-gcc), qemu-system-aarch64
 # (QEMU, default qemu-system-aarch64) and python3. The mini UART (what the
@@ -23,11 +23,15 @@ $CC -nostdlib -static -T "$HERE/loader/link.ld" -o "$OUT/loader.elf" "$OUT/start
 
 # 2. payload: the kernel's segments + ADT + command line, placed at PAYLOAD_PA
 # RAMDISK=image makes the payload carry a RAM disk root (boot-arg rd=md0);
+# SDIMG=image attaches it as the SD card (a power-of-two size) and roots on it (rd=sdroot0).
 # CMDLINE overrides the default boot-args.
 set -- "$KERNEL" "$OUT/payload.bin"
 if [ -n "${RAMDISK:-}" ]; then
     set -- "$@" --ramdisk "$RAMDISK"
     : "${CMDLINE:=debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress rd=md0}"
+fi
+if [ -n "${SDIMG:-}" ]; then
+    : "${CMDLINE:=debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress rd=sdroot0}"
 fi
 [ -n "${CMDLINE:-}" ] && set -- "$@" --cmdline "$CMDLINE"
 python3 "$HERE/tools/mkpi_payload.py" "$@"
@@ -37,6 +41,7 @@ rm -f "$OUT/uart1.log"
 set +e
 timeout "$SECS" "$QEMU" -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
+    ${SDIMG:+-drive file="$SDIMG",if=sd,format=raw} \
     -display none -serial null -serial file:"$OUT/uart1.log" \
     -D "$OUT/qemu.log" -d int,guest_errors -no-reboot
 rc=$?
