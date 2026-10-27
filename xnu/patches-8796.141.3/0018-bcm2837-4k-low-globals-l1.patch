@@ -1,0 +1,17 @@
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -2102,6 +2102,14 @@
+ 	 *     LOW_GLOBAL_BASE_ADDRESS + 2MB
+ 	 */
+ 	va_l1 = va_l2 = LOW_GLOBAL_BASE_ADDRESS;
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++	/*
++	 * BCM2837 (4K pages): an L1 entry covers 1 GiB, so the low globals do not
++	 * share the kernel's L1 entry as they do with 16K pages, and nothing has
++	 * allocated their L2 table yet.
++	 */
++	init_ptpages(cpu_tte, va_l1, va_l1 + ARM_TT_L2_SIZE, TRUE, ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN);
++#endif /* ARM64_BOARD_CONFIG_BCM2837 */
+ 	cpu_l1_tte = cpu_tte + ((va_l1 & ARM_TT_L1_INDEX_MASK) >> ARM_TT_L1_SHIFT);
+ 	cpu_l2_tte = ((tt_entry_t *) phystokv(((*cpu_l1_tte) & ARM_TTE_TABLE_MASK))) + ((va_l2 & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT);
+ 	ptpage_vaddr = alloc_ptpage(TRUE);

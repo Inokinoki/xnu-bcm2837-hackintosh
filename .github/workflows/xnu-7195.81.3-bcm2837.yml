@@ -1,7 +1,7 @@
 name: xnu-bcm2837
 
 # Builds xnu-7195.81.3 for the Raspberry Pi 3 (BCM2837) machine config with the
-# patches in xnu/patches/, on a macOS runner (the kernel needs Apple's toolchain).
+# patches in xnu/patches-7195.81.3/, on a macOS runner (the kernel needs Apple's toolchain).
 # Optional QEMU boot test: qemu-system-aarch64 -M raspi3b, see the qemu_boot job.
 
 on:
@@ -20,8 +20,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "xnu/patches/**"
-      - ".github/workflows/xnu-bcm2837.yml"
+      - "xnu/patches-7195.81.3/**"
+      - ".github/workflows/xnu-7195.81.3-bcm2837.yml"
 
 concurrency:
   group: xnu-bcm2837-${{ github.ref }}
@@ -34,13 +34,22 @@ env:
   BOOTSTRAP_REPO: https://github.com/apple-oss-distributions/bootstrap_cmds.git
   # bootstrap_cmds-121 is the mig release shipped with macOS 11.0.1 (xnu-7195.50.7.100.1).
   BOOTSTRAP_TAG: bootstrap_cmds-121
+  # availability.pl (used by bsd/sys/make_symbol_aliasing.sh) is not in the SDK.
+  AV_REPO: https://github.com/apple-oss-distributions/AvailabilityVersions.git
+  AV_TAG: AvailabilityVersions-69.2
+  AV_SHA: c7eca501771164b744ec1993344d21e9b6f30dfd
+  # libdispatch-1271.40.12 (macOS 11.0.1 manifest): firehose headers for the kernel.
+  LD_REPO: https://github.com/apple-oss-distributions/libdispatch.git
+  LD_TAG: libdispatch-1271.40.12
+  LD_SHA: df1a20f0926bdda255d019b04b0a771df66448fa
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
 
 jobs:
   build:
-    # macOS 13 runners ship Xcode 14.x. xnu-7195 predates the Xcode 15/16 changes
-    # that broke xnu-8796 (see ios-sweet's xnu.yml). Not yet verified on CI.
-    runs-on: macos-13
+    # macos-13 never got a runner (job stayed queued), so use macos-14 (Xcode 15.x).
+    # xnu-7195 predates the Xcode 16 changes that broke xnu-8796.141.3 (see ios-sweet's
+    # xnu.yml). Not yet verified on CI.
+    runs-on: macos-14
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -60,10 +69,52 @@ jobs:
           git -C xnu-src checkout -q FETCH_HEAD
           test "$(git -C xnu-src rev-parse HEAD)" = "$XNU_SHA"
 
+      - name: Fetch availability.pl at the pinned commit
+        run: |
+          git init -q av
+          git -C av fetch -q --depth 1 "$AV_REPO" "refs/tags/$AV_TAG"
+          git -C av checkout -q FETCH_HEAD
+          test "$(git -C av rev-parse HEAD)" = "$AV_SHA"
+          install -m 755 av/availability.pl "$RUNNER_TEMP/availability.pl"
+          echo "AVAILABILITY_PL=$RUNNER_TEMP/availability.pl" >> "$GITHUB_ENV"
+
+      - name: Stage libdispatch headers (firehose)
+        run: |
+          git init -q libdispatch
+          git -C libdispatch fetch -q --depth 1 "$LD_REPO" "refs/tags/$LD_TAG"
+          git -C libdispatch checkout -q FETCH_HEAD
+          test "$(git -C libdispatch rev-parse HEAD)" = "$LD_SHA"
+          INC="$RUNNER_TEMP/libdispatch-inc"
+          mkdir -p "$INC/os" "$INC/dispatch"
+          cp libdispatch/os/*.h "$INC/os/"
+          # os/atomic_private.h is not in libdispatch or libplatform-254; xnu's libkern has it
+          cp xnu-src/libkern/os/atomic*.h "$INC/os/"
+          cp libdispatch/dispatch/*.h "$INC/dispatch/"
+          # OS_FIREHOSE_SPI gates the kernel side of os/firehose_buffer_private.h
+          echo "LIBDISPATCH_INCFLAGS=-I$INC -DOS_FIREHOSE_SPI=1" >> "$GITHUB_ENV"
+          # stdatomic.h is a clang builtin header; the kernel-style include set has no path to it
+          echo "CLANG_RESOURCE_INC=$(xcrun clang -print-resource-dir)/include" >> "$GITHUB_ENV"
+
+      - name: Build libfirehose_kernel from libdispatch
+        run: |
+          cd libdispatch
+          DSTROOT="$RUNNER_TEMP/firehose.dst"
+          # The xcconfig points headers at the SDK's usr/local, which this SDK lacks:
+          # use the libdispatch sources directly and build the arm64 kernel archive.
+          xcodebuild install -project libdispatch.xcodeproj -target libfirehose_kernel \
+            -sdk macosx ARCHS=arm64 VALID_ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="-" \
+            HEADER_SEARCH_PATHS="$PWD $PWD/os $RUNNER_TEMP/libdispatch-inc $CLANG_RESOURCE_INC $GITHUB_WORKSPACE/xnu-src/osfmk $GITHUB_WORKSPACE/xnu-src/libkern "'$(SDKROOT)/System/Library/Frameworks/Kernel.framework/PrivateHeaders $(SDKROOT)/System/Library/Frameworks/Kernel.framework/Headers $(SDKROOT)/usr/include' \
+            OBJROOT="$RUNNER_TEMP/firehose.obj" SYMROOT="$RUNNER_TEMP/firehose.sym" DSTROOT="$DSTROOT"
+          LIB=$(find "$DSTROOT" -name 'libfirehose_kernel.a' | head -1)
+          test -f "$LIB"
+          echo "FIREHOSE_LIB_DIR=$(dirname "$LIB")" >> "$GITHUB_ENV"
+          lipo -info "$LIB" || true
+
       - name: Apply BCM2837 patches
         run: |
           cd xnu-src
-          for p in "$GITHUB_WORKSPACE"/xnu/patches/*.patch; do
+          for p in "$GITHUB_WORKSPACE"/xnu/patches-7195.81.3/*.patch; do
             echo "== $(basename "$p")"
             git apply --verbose "$p"
           done
@@ -100,6 +151,7 @@ jobs:
           make $MAKEFLAGS_EXTRA SDKROOT=macosx \
             ARCH_CONFIGS=ARM64 MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS="$KERNEL_CONFIG" \
             BUILD_WERROR=0 DO_CTFMERGE=0 MIG="$MIG" MIGCOM="$MIGCOM" \
+            LDFLAGS_KERNEL_SDK="-L$FIREHOSE_LIB_DIR" \
             2>&1 | tee "$RUNNER_TEMP/build.log"
 
       - name: Collect kernel

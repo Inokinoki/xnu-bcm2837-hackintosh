@@ -1,0 +1,62 @@
+diff --git a/osfmk/vm/vm_compressor.c b/osfmk/vm/vm_compressor.c
+index 1e7ca07..ba9d636 100644
+--- a/osfmk/vm/vm_compressor.c
++++ b/osfmk/vm/vm_compressor.c
+@@ -150,7 +150,7 @@ boolean_t validate_c_segs = TRUE;
+  * the boot-arg & device-tree code.
+  */
+ 
+-#if !XNU_TARGET_OS_OSX
++#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_BCM2837)
+ 
+ #if CONFIG_FREEZE
+ int     vm_compressor_mode = VM_PAGER_FREEZER_DEFAULT;
+@@ -1053,7 +1053,7 @@ vm_compressor_init(void)
+ 
+ 	assert((C_SEGMENTS_PER_PAGE * sizeof(union c_segu)) == PAGE_SIZE);
+ 
+-#if !XNU_TARGET_OS_OSX
++#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_BCM2837)
+ 	vm_compressor_minorcompact_threshold_divisor = 20;
+ 	vm_compressor_majorcompact_threshold_divisor = 30;
+ 	vm_compressor_unthrottle_threshold_divisor = 40;
+@@ -5327,7 +5327,7 @@ done:
+ 		vm_swap_consider_defragmenting(VM_SWAP_FLAGS_NONE);
+ 	}
+ 
+-#if !XNU_TARGET_OS_OSX
++#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_BCM2837)
+ 	if ((c_minor_count && COMPRESSOR_NEEDS_TO_MINOR_COMPACT()) || vm_compressor_needs_to_major_compact()) {
+ 		vm_wake_compactor_swapper();
+ 	}
+diff --git a/osfmk/vm/vm_compressor_backing_store.c b/osfmk/vm/vm_compressor_backing_store.c
+index a645750..1e4465e 100644
+--- a/osfmk/vm/vm_compressor_backing_store.c
++++ b/osfmk/vm/vm_compressor_backing_store.c
+@@ -132,7 +132,7 @@ extern int vnode_getwithref(struct vnode* vp);
+ 
+ boolean_t vm_swap_force_defrag = FALSE, vm_swap_force_reclaim = FALSE;
+ 
+-#if !XNU_TARGET_OS_OSX
++#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_BCM2837)
+ 
+ /*
+  * For CONFIG_FREEZE, we scale the c_segments_limit based on the
+@@ -467,7 +467,7 @@ vm_compressor_swap_init(void)
+ 
+ 	queue_init(&swf_global_queue);
+ 
+-#if !XNU_TARGET_OS_OSX
++#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_BCM2837)
+ 	/*
+ 	 * dummy value until the swap file gets created
+ 	 * when we drive the first c_segment_t to the
+@@ -1605,7 +1605,7 @@ vm_swap_create_file()
+ 			lck_mtx_unlock(&vm_swap_data_lock);
+ 
+ 			thread_wakeup((event_t) &vm_num_swap_files);
+-#if !XNU_TARGET_OS_OSX
++#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_BCM2837)
+ 			if (vm_num_swap_files == 1) {
+ 				c_overage_swapped_limit = (uint32_t)size / c_seg_bufsize;
+ 

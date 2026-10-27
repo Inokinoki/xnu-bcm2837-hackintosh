@@ -1,0 +1,103 @@
+name: xnu-8796.141.3-bcm2837
+
+# Builds xnu-8796.141.3 (macOS 13.5, the iOS 16 generation) for the Raspberry Pi 3
+# (BCM2837) machine config, using blacktop/darwin-xnu-build the same way
+# ios-sweet's xnu.yml does. The patches live in xnu/patches-8796.141.3/.
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos_version:
+        description: macOS release whose xnu to build (13.5 = xnu-8796.141.3)
+        default: "13.5"
+      kernel_config:
+        description: RELEASE / DEVELOPMENT / DEBUG
+        default: DEVELOPMENT
+      keep_going:
+        description: make -k (collect all compile errors in one run)
+        default: "true"
+  push:
+    branches: [xnu-8796-bcm2837]
+    paths:
+      - "xnu/patches-8796.141.3/**"
+      - ".github/workflows/xnu-8796.141.3-bcm2837.yml"
+
+concurrency:
+  group: xnu-8796.141.3-bcm2837-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DXB_REPO: https://github.com/blacktop/darwin-xnu-build
+  DXB_SHA: 663906528d1cd5ea8fde7de6f16de73db9511549
+  MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
+  KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
+  MACHINE_CONFIG: BCM2837
+
+jobs:
+  build:
+    # macos-14 ships Xcode 15.x, whose iig matches the xnu-8796.141.3 IORPC ABI
+    # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks).
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch build script
+        run: |
+          git init -q dxb
+          git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
+          git -C dxb checkout -q FETCH_HEAD
+          # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
+          cp xnu/patches-8796.141.3/*.patch xnu/patches-8796.141.3/*.sh dxb/patches/
+          # libfirehose_kernel is built for x86_64/arm64e by default; the BCM2837 kernel
+          # links only its arm64 slice, and that slice must target the Pi 3's Cortex-A53
+          # (ARMv8.0): the default Apple CPU emits LSE atomics (ldadd), which trap there.
+          # $(inherited) keeps the library's own flags (-DKERNEL=1 ...).
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('dxb/build.sh')
+          s = p.read_text()
+          old = 'ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"'
+          assert s.count(old) == 1, s.count(old)
+          new = 'ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS=\'$(inherited) -mcpu=cortex-a53\''
+          p.write_text(s.replace(old, new))
+          PY
+          grep -c "OTHER_CFLAGS='\$(inherited) -mcpu=cortex-a53'" dxb/build.sh
+          ls dxb/patches
+
+      - name: Deps
+        run: |
+          brew install jq gum bash cmake ninja
+          # build.sh only checks that xcodes exists (Xcode is preinstalled)
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
+          sudo chmod +x /usr/local/bin/xcodes
+          sw_vers
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcrun --find iig
+
+      - name: Build
+        working-directory: dxb
+        env:
+          # keep going after errors so one run reports every compile failure
+          MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
+        run: bash build.sh
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
+          ls -la out
+          (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xnu-8796.141.3-bcm2837-kernel
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14

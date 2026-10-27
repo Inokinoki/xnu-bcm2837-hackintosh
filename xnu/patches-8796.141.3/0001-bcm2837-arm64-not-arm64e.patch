@@ -1,0 +1,25 @@
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index 5bd6f23..524b6d3 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -262,6 +262,11 @@ ifneq ($(filter arm64,$(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG)),)
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64e
+ endif
+ 
++# BCM2837 (Raspberry Pi 3) is ARMv8.0 with no pointer authentication: plain arm64.
++ifeq ($(CURRENT_MACHINE_CONFIG),BCM2837)
++export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64
++endif
++
+ endif
+ 
+ 
+@@ -832,6 +837,8 @@ LDFLAGS_KERNEL_ONLY_SUBARCH_arm64e = \
+ 	-Wl,-add_split_seg_info \
+ 	-Wl,-kernel
+ 
++LDFLAGS_KERNEL_ONLY_SUBARCH_arm64 = $(LDFLAGS_KERNEL_ONLY_SUBARCH_arm64e)
++
+ LDFLAGS_KERNEL_ONLY_SUBARCH_x86_64 = \
+ 	-Wl,-add_split_seg_info \
+ 	-Wl,-kernel
