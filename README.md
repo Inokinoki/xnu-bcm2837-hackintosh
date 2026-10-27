@@ -4,7 +4,7 @@ I am trying to run XNU/Hackintosh, if possible. You can back me on this project 
 
 ## Status
 
-The xnu-8796 kernel (the iOS 16 / macOS 13.5 generation) builds in CI for the
+The xnu-8796.141.3 kernel (the iOS 16 / macOS 13.5 generation) builds in CI for the
 BCM2837 machine config and **boots on QEMU `raspi3b` up to an idle IOKit**:
 virtual memory, zones, the logging subsystem and the BCM2837 platform expert come
 up and the kernel then sits in the idle thread. Not yet done: a root filesystem,
@@ -25,7 +25,7 @@ BCM2837: platform expert registered
 
 XNU Kernel:
 
-- [x] Compile Mach-O (xnu-8796, `xnu/patches-8796/`, built by `.github/workflows/xnu-8796-bcm2837.yml`)
+- [x] Compile Mach-O (xnu-8796.141.3, `xnu/patches-8796.141.3/`, built by `.github/workflows/xnu-8796.141.3-bcm2837.yml`)
 - [x] Mach-O loader (`loader/`): EL3/EL2 to EL1, copy the segments, boot_args and a minimal ADT, jump
 - [x] Make sure the kernel is bootable (on QEMU `raspi3b`; real hardware untested)
 - [x] Make sure UART works (the mini UART, set up without an ADT)
@@ -38,7 +38,7 @@ Hackintosh:
 
 ## How it is built and booted
 
-- `xnu/patches-8796/` are applied on top of xnu-8796.141.3 by
+- `xnu/patches-8796.141.3/` are applied on top of xnu-8796.141.3 by
   [blacktop/darwin-xnu-build](https://github.com/blacktop/darwin-xnu-build) on a macOS runner.
   The kernel is plain arm64 (no PAC), built for the Cortex-A53, with 4K pages and the
   standard non-large-memory layout (linked at `0xfffffff007004000`).
@@ -50,5 +50,5 @@ Hackintosh:
 
 Needs: an aarch64 gcc, `qemu-system-aarch64`, `gdb-multiarch` (optional) and Python 3.
 
-The first attempt used xnu-7195.81.3 ([notes](Build/XNU-7195.81.3.md), patches in `xnu/patches/`).
-It is kept for reference but superseded: iOS 16 userland needs the xnu-8796 kernel.
+The first attempt used xnu-7195.81.3 ([notes](Build/XNU-7195.81.3.md), patches in `xnu/patches-7195.81.3/`).
+It is kept for reference but superseded: iOS 16 userland needs the xnu-8796.141.3 kernel.
