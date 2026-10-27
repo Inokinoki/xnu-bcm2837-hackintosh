@@ -1,0 +1,33 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -371,7 +371,12 @@
+ 	if (ntohl(cd->magic) != CSMAGIC_CODEDIRECTORY) {
+ 		return EBADEXEC;
+ 	}
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++	/* iOS signatures hash 16K pages; the BCM2837 kernel's VM pages are 4K (see cs_validate_hash). */
++	if ((cd->pageSize != PAGE_SHIFT_4K) && (cd->pageSize != PAGE_SHIFT) && (cd->pageSize != 14 /* 16K */)) {
++#else
+ 	if ((cd->pageSize != PAGE_SHIFT_4K) && (cd->pageSize != PAGE_SHIFT)) {
++#endif
+ 		printf("disallowing unsupported code signature page shift: %u\n", cd->pageSize);
+ 		return EBADEXEC;
+ 	}
+@@ -5712,6 +5717,17 @@
+ 		}
+ 
+ 		blob_addr = kaddr + blob->csb_mem_offset;
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++		if (blob->csb_hash_pageshift > PAGE_SHIFT) {
++			/*
++			 * 16K hash pages on 4K VM pages: one page cannot be hashed on its own and
++			 * there is no chain of trust here to enforce, so accept the covered page.
++			 */
++			*bytes_processed = PAGE_SIZE;
++			*tainted = 0;
++			return TRUE;
++		}
++#endif
+ 		lower_bound = CAST_DOWN(char *, blob_addr);
+ 		upper_bound = lower_bound + blob->csb_mem_size;
+ 
