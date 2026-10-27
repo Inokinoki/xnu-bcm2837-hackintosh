@@ -5,7 +5,7 @@
  433	AUE_NULL	ALL	{ int pid_suspend(int pid); }
  434	AUE_NULL	ALL	{ int pid_resume(int pid); }
 -#if CONFIG_EMBEDDED
-+#if CONFIG_EMBEDDED || defined(ARM64_BOARD_CONFIG_SWEET)
++#if CONFIG_EMBEDDED || defined(ARM64_BOARD_CONFIG_BCM2837)
  435	AUE_NULL	ALL	{ int pid_hibernate(int pid); }
  #else
  435     AUE_NULL        ALL     { int nosys(void); }
@@ -16,9 +16,9 @@
  }
  
 -#if !XNU_TARGET_OS_OSX
-+#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_SWEET)
++#if !XNU_TARGET_OS_OSX || defined(ARM64_BOARD_CONFIG_BCM2837)
 +/*
-+ * SWEET runs the iOS userland on the macOS config: SpringBoard calls
++ * BCM2837 runs the iOS userland on the macOS config: SpringBoard calls
 + * pid_hibernate when an app leaves the foreground, and nosys (SIGSYS)
 + * killed it. Without CONFIG_FREEZE this returns 0, as on iOS.
 + */
@@ -30,7 +30,7 @@
  	return error;
  }
 -#endif /* !XNU_TARGET_OS_OSX */
-+#endif /* !XNU_TARGET_OS_OSX || SWEET */
++#endif /* !XNU_TARGET_OS_OSX || BCM2837 */
  
  #if SOCKETS
  int
