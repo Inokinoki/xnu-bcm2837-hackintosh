@@ -5,7 +5,7 @@ I am trying to run XNU/Hackintosh, if possible. You can back me on this project 
 ## Status
 
 The xnu-8796.141.3 kernel (the iOS 16 / macOS 13.5 generation) builds in CI for the
-BCM2837 machine config and **boots on QEMU `raspi3b` up to an idle IOKit**:
+BCM2837 machine config and **boots on QEMU `raspi3b` to userspace**: with a RAM disk root (`rd=md0`, mockfs) the kernel loads `/sbin/launchd` and a test PID 1 runs (`RAMDISK=<image> tools/pi3-qemu-boot.sh KERNEL`, image from `tools/mkpi-init.sh`). Earlier it stopped at an idle IOKit:
 virtual memory, zones, the logging subsystem and the BCM2837 platform expert come
 up and the kernel then sits in the idle thread. Not yet done: a root filesystem,
 `launchd`, any driver besides the mini UART, and a run on real hardware.
