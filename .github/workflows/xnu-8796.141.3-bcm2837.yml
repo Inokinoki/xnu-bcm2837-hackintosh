@@ -17,7 +17,7 @@ on:
         description: make -k (collect all compile errors in one run)
         default: "true"
   push:
-    branches: [xnu-8796-bcm2837, rootfs-ramdisk]
+    branches: [master, xnu-8796-bcm2837, rootfs-ramdisk]
     paths:
       - "xnu/patches-8796.141.3/**"
       - ".github/workflows/xnu-8796.141.3-bcm2837.yml"
