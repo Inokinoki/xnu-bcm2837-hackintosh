@@ -39,7 +39,7 @@ diff --git a/bsd/dev/bcm2837_sd.c b/bsd/dev/bcm2837_sd.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/bcm2837_sd.c
-@@ -0,0 +1,493 @@
+@@ -0,0 +1,494 @@
 +/*
 + * BCM2837 SD card root device (Raspberry Pi 3).
 + *
@@ -238,8 +238,9 @@ new file mode 100644
 +	if ((error = sd_set_clock(0x80u << 8))) {       /* about 400 kHz at the usual base clock */
 +		return error;
 +	}
-+	sd_wr(R_IRPT_EN, 0xffffffff);           /* status bits are polled, nothing is routed to the CPU */
-+	sd_wr(R_IRPT_MASK, 0);
++	/* 0x34 is the status ENABLE (bits only latch when set), 0x38 the signal enable: polled, so off */
++	sd_wr(R_IRPT_MASK, 0xffffffff);
++	sd_wr(R_IRPT_EN, 0);
 +	delay(2000);
 +
 +	sd.rca = 0;
