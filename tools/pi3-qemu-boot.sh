@@ -23,6 +23,7 @@ $CC -nostdlib -static -T "$HERE/loader/link.ld" -o "$OUT/loader.elf" "$OUT/start
 
 # 2. payload: the kernel's segments + ADT + command line, placed at PAYLOAD_PA
 # RAMDISK=image makes the payload carry a RAM disk root (boot-arg rd=md0);
+# SDSNAPSHOT=1 keeps the image unmodified (QEMU snapshot=on).
 # SDIMG=image attaches it as the SD card (a power-of-two size) and roots on it (rd=sdroot0).
 # CMDLINE overrides the default boot-args.
 set -- "$KERNEL" "$OUT/payload.bin"
@@ -41,7 +42,7 @@ rm -f "$OUT/uart1.log"
 set +e
 timeout "$SECS" "$QEMU" -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
-    ${SDIMG:+-drive file="$SDIMG",if=sd,format=raw} \
+    ${SDIMG:+-drive file="$SDIMG",if=sd,format=raw${SDSNAPSHOT:+,snapshot=on}} \
     -display none -serial null -serial file:"$OUT/uart1.log" \
     -D "$OUT/qemu.log" -d int,guest_errors -no-reboot
 rc=$?
