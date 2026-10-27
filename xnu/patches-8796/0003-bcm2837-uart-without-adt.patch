@@ -1,8 +1,8 @@
 diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
-index 997a4ab..9917300 100644
+index 997a4ab..4b4b5b6 100644
 --- a/pexpert/arm/pe_serial.c
 +++ b/pexpert/arm/pe_serial.c
-@@ -769,6 +769,21 @@ serial_init(void)
+@@ -769,6 +769,28 @@ serial_init(void)
  		return 1;
  	}
  
@@ -18,13 +18,20 @@ index 997a4ab..9917300 100644
 +	pi3_aux_base_vaddr = ml_io_map(0x3F215000, 0x1000);
 +	register_serial_functions(&pi3_uart_serial_functions);
 +	pi3_uart_init();
++	/*
++	 * serial_init() runs more than once. Without this the second call would
++	 * register the same node again (fns->next == fns) and every character
++	 * would be sent forever.
++	 */
++	serial_do_transmit = 1;
++	uart_initted = true;
 +	return 1;
 +#endif /* PI3_UART */
 +
  	soc_base = pe_arm_get_soc_base_phys();
  
  	if (soc_base == 0) {
-@@ -777,20 +792,6 @@ serial_init(void)
+@@ -777,20 +799,6 @@ serial_init(void)
  
  	PE_parse_boot_argn("disable-uart-irq", &disable_uart_irq, sizeof(disable_uart_irq));
  

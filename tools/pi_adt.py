@@ -65,6 +65,10 @@ def build(dram_base, dram_size, cmdline=''):
     mmap = chosen.child('memory-map')
     mmap.prop('name', 'memory-map')
 
+    # pmap_compute_max_asids() looks up /defaults; its properties are optional.
+    defaults = root.child('defaults')
+    defaults.prop('name', 'defaults')
+
     # pe_arm_get_soc_base_phys(): the SoC base is ranges[1] of arm-io (the parent
     # address). Zero there disables the platform setup, including the timebase.
     arm_io = root.child('arm-io')
