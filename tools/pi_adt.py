@@ -81,6 +81,8 @@ def build(dram_base, dram_size, cmdline=''):
     cpus.prop('name', 'cpus')
     cpu0 = cpus.child('cpu0')
     cpu0.prop('name', 'cpu0')
+    cpu0.prop('device_type', 'cpu')
+    cpu0.prop('compatible', 'arm,cortex-a53')
     cpu0.prop('state', 'running')
     cpu0.prop('reg', struct.pack('<I', 0))
     cpu0.prop('timebase-frequency', struct.pack('<I', TIMEBASE_HZ))
