@@ -1,0 +1,23 @@
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -2543,6 +2543,12 @@
+ 		ret = TRUE;
+ 	}
+ 
++#if !defined(ARM64_BOARD_CONFIG_BCM2837)
++	/*
++	 * BCM2837: this region covers the whole kernel VA range below the low
++	 * globals and so overlaps regions 0 and 1, which are already entered in the
++	 * kernel map: vm_map_enter() then fails with KERN_NO_SPACE in kmem_init().
++	 */
+ 	if (region_select == 3) {
+ 		/* In this config, we allow the bootstrap mappings to occupy the same
+ 		 * page table pages as the heap.
+@@ -2551,6 +2557,7 @@
+ 		*size = LOW_GLOBAL_BASE_ADDRESS - *startp;
+ 		ret = TRUE;
+ 	}
++#endif /* !ARM64_BOARD_CONFIG_BCM2837 */
+ #endif /* defined(ARM_LARGE_MEMORY) */
+ #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) */
+ 	return ret;
