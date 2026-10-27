@@ -16,5 +16,6 @@ OUTDIR=$(realpath "$(dirname "$OUT")")
 docker build -q -t pi-ios-root "$HERE/ios-root-docker" >/dev/null
 docker run --rm --privileged -v /lib/modules:/lib/modules:ro \
     -v "$DIR":/ipsw:ro -v "$OUTDIR":/out -v "$HERE/ios-root-docker/mkios-root.sh":/mkios-root.sh:ro \
+    -v "$HERE/ios-root-tweaks.py":/ios-root-tweaks.py:ro \
     pi-ios-root /mkios-root.sh /ipsw/087-86698-044.dmg /ipsw/087-86593-047.dmg /ipsw/087-86715-047.dmg \
     "/out/$(basename "$OUT")" "$SIZE"

@@ -84,9 +84,15 @@ SDSNAPSHOT=1 SDIMG=ios16-root.img tools/pi3-qemu-boot.sh KERNEL 300
 ```
 
 `unentitled_ios_sim_launch=1` lets the macOS-configured kernel run iOS binaries; `ignition_level=1` makes
-dyld use `/System/Library/Caches/com.apple.dyld` (the image has hard links there). Observed on QEMU `raspi3b`:
-Apple's launchd (Darwin Bootstrapper 7.0.0) maps the dyld shared cache (16K code signature pages are accepted,
-not verified, see xnu patch 0040), runs its boot tasks (fsck, mount, data protection, MSU, corecrypto FIPS self test),
-and stops at `keybagd`: the device tree has no `options` node and there is no AppleKeyStore. Not done: keybag,
-networking, SpringBoard; no hardware test. It is slow (QEMU TCG, minutes to the keybag step).
+dyld use `/System/Library/Caches/com.apple.dyld` (the image has hard links there); add
+`launchd_unsecure_cache=1` (a number, not a path) so `launchd_cache_loader` accepts the unsigned launchd.plist
+and skips the AMFI lookup. The image carries `tools/ios-root-tweaks.py`'s changes (`_PanicOnCrash` renamed).
 
+Observed on QEMU `raspi3b` (xnu patches 0040-0048): Apple's launchd (Darwin Bootstrapper 7.0.0) maps the dyld
+shared cache (16K code signature pages are accepted, not verified: patch 0040), runs all its boot tasks
+(fsck, mount, data protection, MSU, corecrypto FIPS self test, keybag, launchd_cache_loader), finishes early boot
+and starts the regular daemons: xpcproxy, watchdogd, SpringBoard, backboardd, mediaserverd, mDNSResponder,
+bluetoothd, lockdownd, locationd ... In a 15 minute run there is no kernel panic, but SpringBoard, backboardd
+and mediaserverd crash-loop ("Too many corpses being created"): there is no display, IOSurface, HID or GPU
+driver. Not done: those drivers (the Pi 3 has a VideoCore mailbox framebuffer), a real AppleMobileFileIntegrity,
+networking; no hardware test. It is slow (QEMU TCG: minutes to early boot).

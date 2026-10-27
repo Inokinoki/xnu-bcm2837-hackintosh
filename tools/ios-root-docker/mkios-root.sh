@@ -87,6 +87,9 @@ printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
 	'<plist version="1.0"><dict><key>KeyBagKeys</key><data>U1dFRVQ=</data></dict></plist>' |
 	install -m 0600 -o 0 -g 0 /dev/stdin "$work/root/private/var/keybags/systembag.kb"
 
+# Bring-up tweaks (launchd _PanicOnCrash off, containers dirs): needs boot-arg launchd_unsecure_cache=1.
+python3 /ios-root-tweaks.py "$work/root"
+
 df -h "$work/root"
 umount "$work/root"
 # Linux hfsplus decomposes some non-ASCII names differently from Apple's tables: let fsck rewrite them.
