@@ -48,7 +48,7 @@ jobs:
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
           # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
-          cp xnu/patches-8796.141.3/*.patch dxb/patches/
+          cp xnu/patches-8796.141.3/*.patch xnu/patches-8796.141.3/*.sh dxb/patches/
           # libfirehose_kernel is built for x86_64/arm64e by default; the BCM2837 kernel
           # links only its arm64 slice, and that slice must target the Pi 3's Cortex-A53
           # (ARMv8.0): the default Apple CPU emits LSE atomics (ldadd), which trap there.

@@ -1,7 +1,7 @@
 name: xnu-bcm2837
 
 # Builds xnu-7195.81.3 for the Raspberry Pi 3 (BCM2837) machine config with the
-# patches in xnu/patches/, on a macOS runner (the kernel needs Apple's toolchain).
+# patches in xnu/patches-7195.81.3/, on a macOS runner (the kernel needs Apple's toolchain).
 # Optional QEMU boot test: qemu-system-aarch64 -M raspi3b, see the qemu_boot job.
 
 on:
@@ -20,8 +20,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "xnu/patches/**"
-      - ".github/workflows/xnu-bcm2837.yml"
+      - "xnu/patches-7195.81.3/**"
+      - ".github/workflows/xnu-7195.81.3-bcm2837.yml"
 
 concurrency:
   group: xnu-bcm2837-${{ github.ref }}
@@ -114,7 +114,7 @@ jobs:
       - name: Apply BCM2837 patches
         run: |
           cd xnu-src
-          for p in "$GITHUB_WORKSPACE"/xnu/patches/*.patch; do
+          for p in "$GITHUB_WORKSPACE"/xnu/patches-7195.81.3/*.patch; do
             echo "== $(basename "$p")"
             git apply --verbose "$p"
           done

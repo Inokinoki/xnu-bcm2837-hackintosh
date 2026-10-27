@@ -50,5 +50,5 @@ Hackintosh:
 
 Needs: an aarch64 gcc, `qemu-system-aarch64`, `gdb-multiarch` (optional) and Python 3.
 
-The first attempt used xnu-7195.81.3 ([notes](Build/XNU-7195.81.3.md), patches in `xnu/patches/`).
+The first attempt used xnu-7195.81.3 ([notes](Build/XNU-7195.81.3.md), patches in `xnu/patches-7195.81.3/`).
 It is kept for reference but superseded: iOS 16 userland needs the xnu-8796.141.3 kernel.
