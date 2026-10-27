@@ -1,0 +1,18 @@
+diff --git a/osfmk/kern/zalloc.c b/osfmk/kern/zalloc.c
+index 182b44a..1c1e0dd 100644
+--- a/osfmk/kern/zalloc.c
++++ b/osfmk/kern/zalloc.c
+@@ -160,7 +160,12 @@ ZONE_DEFINE_TYPE(percpu_u64_zone, "percpu.64", uint64_t,
+ #define ZONE_GUARD_SPARSE       (64  * 1024)
+ #endif /* ZSECURITY_CONFIG(SAD_FENG_SHUI) */
+ 
+-#if XNU_PLATFORM_MacOSX
++/*
++ * BCM2837 is built as a macOS platform but only has a 112 GiB kernel VA window
++ * (39-bit, 4K pages): the 128 GiB macOS zone range cannot fit, kmem_range_init()
++ * panics. Use the embedded sizes.
++ */
++#if XNU_PLATFORM_MacOSX && !defined(ARM64_BOARD_CONFIG_BCM2837)
+ #define ZONE_MAP_MAX            (32ULL << 30)
+ #define ZONE_MAP_VA_SIZE        (128ULL << 30)
+ #else /* XNU_PLATFORM_MacOSX */
