@@ -59,6 +59,8 @@ def build(dram_base, dram_size, cmdline=''):
     chosen.prop('dram-base', dram_base)
     chosen.prop('dram-size', dram_size)
     chosen.prop('boot-args', cmdline)
+    # 64 bytes, filled by the loader from the Pi's RNG before the kernel runs
+    chosen.prop('random-seed', b'\x01' * 64)
 
     mmap = chosen.child('memory-map')
     mmap.prop('name', 'memory-map')

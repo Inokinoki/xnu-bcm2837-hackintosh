@@ -20,6 +20,11 @@
 #define GPPUD		(MMIO_BASE + 0x200094)
 #define GPPUDCLK0	(MMIO_BASE + 0x200098)
 
+#define RNG_BASE	(MMIO_BASE + 0x104000)
+#define RNG_CTRL	(RNG_BASE + 0x00)
+#define RNG_STATUS	(RNG_BASE + 0x04)
+#define RNG_DATA	(RNG_BASE + 0x08)
+
 #define mmio_w(a, v)	(*(volatile uint32_t *)(a) = (uint32_t)(v))
 #define mmio_r(a)	(*(volatile uint32_t *)(a))
 
@@ -98,6 +103,67 @@ static void zero64(uintptr_t dst, uint64_t n)
 		d[i] = 0;
 }
 
+/*
+ * Fill the 64-byte /chosen/random-seed the kernel's PRNG needs. The BCM2835 RNG
+ * is used when it produces data; otherwise a counter-based mix, which is NOT
+ * secure and only for bring-up.
+ */
+static uint64_t cntpct(void)
+{
+	uint64_t v;
+	__asm__ volatile("mrs %0, cntpct_el0" : "=r"(v));
+	return v;
+}
+
+static void fill_seed(uint8_t *dst, uint32_t n)
+{
+	mmio_w(RNG_STATUS, 0x40000);
+	mmio_w(RNG_CTRL, 1);
+	int hw = 1;
+	for (uint32_t i = 0; i < n; i += 4) {
+		uint32_t w = 0;
+		uint32_t tries = 0;
+		while (!(mmio_r(RNG_STATUS) >> 24) && tries++ < 0x100000) ;
+		if (!(mmio_r(RNG_STATUS) >> 24)) {
+			hw = 0;
+			break;
+		}
+		w = mmio_r(RNG_DATA);
+		for (int k = 0; k < 4 && i + k < n; k++)
+			dst[i + k] = (w >> (8 * k)) | 1;	/* never zero: the kernel rejects all-null seeds */
+	}
+	if (!hw) {
+		uint64_t x = cntpct() ^ 0x9e3779b97f4a7c15ULL;
+		for (uint32_t i = 0; i < n; i++) {
+			x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+			dst[i] = (uint8_t)(x | 1);
+		}
+		uart_puts("[loader] random-seed: counter fallback (not secure)\n");
+	} else {
+		uart_puts("[loader] random-seed: BCM2835 RNG\n");
+	}
+}
+
+/* Find the copied ADT's "random-seed" property and fill its value. */
+static void seed_adt(uintptr_t adt, uint64_t size)
+{
+	static const char name[] = "random-seed";
+	const uint8_t *b = (const uint8_t *)adt;
+	for (uint64_t i = 0; i + 32 + 4 + 64 <= size; i += 4) {
+		int hit = 1;
+		for (int k = 0; name[k]; k++)
+			if (b[i + k] != (uint8_t)name[k]) { hit = 0; break; }
+		if (hit && b[i + 11] == 0) {
+			uint32_t len = *(const uint32_t *)(adt + i + 32);
+			if ((len & 0x7fffffff) == 64) {
+				fill_seed((uint8_t *)(adt + i + 36), 64);
+				return;
+			}
+		}
+	}
+	uart_puts("[loader] no random-seed property in the ADT\n");
+}
+
 static int magic_ok(const char *m)
 {
 	static const char want[] = PAYLOAD_MAGIC;
@@ -147,6 +213,7 @@ void loader_main(uint64_t dtb)
 	/* ADT, then boot_args, right behind the kernel; everything below topOfKernelData is ours. */
 	uintptr_t adt_pa = p->kernel_end + pa_of_va;
 	copy64(adt_pa, (uintptr_t)p + p->adt_off, p->adt_size);
+	seed_adt(adt_pa, p->adt_size);
 	uintptr_t ba_pa = (adt_pa + p->adt_size + PAGE_16K - 1) & ~(PAGE_16K - 1);
 	uintptr_t top = ba_pa + PAGE_16K;
 
