@@ -1,14 +1,14 @@
-name: xnu-8796-bcm2837
+name: xnu-8796.141.3-bcm2837
 
-# Builds xnu-8796 (macOS 13.5, the iOS 16 generation) for the Raspberry Pi 3
+# Builds xnu-8796.141.3 (macOS 13.5, the iOS 16 generation) for the Raspberry Pi 3
 # (BCM2837) machine config, using blacktop/darwin-xnu-build the same way
-# ios-sweet's xnu.yml does. The patches live in xnu/patches-8796/.
+# ios-sweet's xnu.yml does. The patches live in xnu/patches-8796.141.3/.
 
 on:
   workflow_dispatch:
     inputs:
       macos_version:
-        description: macOS release whose xnu to build (13.5 = xnu-8796)
+        description: macOS release whose xnu to build (13.5 = xnu-8796.141.3)
         default: "13.5"
       kernel_config:
         description: RELEASE / DEVELOPMENT / DEBUG
@@ -19,11 +19,11 @@ on:
   push:
     branches: [xnu-8796-bcm2837]
     paths:
-      - "xnu/patches-8796/**"
-      - ".github/workflows/xnu-8796-bcm2837.yml"
+      - "xnu/patches-8796.141.3/**"
+      - ".github/workflows/xnu-8796.141.3-bcm2837.yml"
 
 concurrency:
-  group: xnu-8796-bcm2837-${{ github.ref }}
+  group: xnu-8796.141.3-bcm2837-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -35,7 +35,7 @@ env:
 
 jobs:
   build:
-    # macos-14 ships Xcode 15.x, whose iig matches the xnu-8796 IORPC ABI
+    # macos-14 ships Xcode 15.x, whose iig matches the xnu-8796.141.3 IORPC ABI
     # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks).
     runs-on: macos-14
     timeout-minutes: 120
@@ -48,7 +48,7 @@ jobs:
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
           # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
-          cp xnu/patches-8796/*.patch dxb/patches/
+          cp xnu/patches-8796.141.3/*.patch dxb/patches/
           # libfirehose_kernel is built for x86_64/arm64e by default; the BCM2837 kernel
           # links only its arm64 slice, and that slice must target the Pi 3's Cortex-A53
           # (ARMv8.0): the default Apple CPU emits LSE atomics (ldadd), which trap there.
@@ -97,7 +97,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: xnu-8796-bcm2837-kernel
+          name: xnu-8796.141.3-bcm2837-kernel
           path: out/
           if-no-files-found: warn
           retention-days: 14
