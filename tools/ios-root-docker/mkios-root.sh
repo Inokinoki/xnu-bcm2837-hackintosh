@@ -80,6 +80,13 @@ for d in diagnostics uuidtext diagnostics/timesync; do
 	install -o 272 -g 272 -m 0644 /dev/null "$db/$d/.migrated"
 done
 
+# System keybag for the built-in AppleKeyStore (xnu patch 0046; no passcode): keybagd reads it as a plain plist.
+install -d -m 0700 -o 0 -g 0 "$work/root/private/var/keybags"
+printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+	'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+	'<plist version="1.0"><dict><key>KeyBagKeys</key><data>U1dFRVQ=</data></dict></plist>' |
+	install -m 0600 -o 0 -g 0 /dev/stdin "$work/root/private/var/keybags/systembag.kb"
+
 df -h "$work/root"
 umount "$work/root"
 # Linux hfsplus decomposes some non-ASCII names differently from Apple's tables: let fsck rewrite them.

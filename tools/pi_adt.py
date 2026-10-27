@@ -77,6 +77,8 @@ def build(dram_base, dram_size, cmdline='', ramdisk=None):
     # pmap_compute_max_asids() looks up /defaults; its properties are optional.
     defaults = root.child('defaults')
     defaults.prop('name', 'defaults')
+    # No effaceable storage: keybagd reads /private/var/keybags/systembag.kb as a plain plist.
+    defaults.prop('no-effaceable-storage', struct.pack('<I', 1))
 
     # pe_arm_get_soc_base_phys(): the SoC base is ranges[1] of arm-io (the parent
     # address). Zero there disables the platform setup, including the timebase.
