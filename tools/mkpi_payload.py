@@ -89,7 +89,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('kernel')
     ap.add_argument('out')
-    ap.add_argument('--cmdline', default='debug=0xc serial=3 cpus=1 keepsyms=1')
+    ap.add_argument('--cmdline', default='debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120')
     a = ap.parse_args()
     blob, info = build(a.kernel, a.cmdline)
     open(a.out, 'wb').write(blob)

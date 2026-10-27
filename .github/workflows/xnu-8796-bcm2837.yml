@@ -49,8 +49,11 @@ jobs:
           git -C dxb checkout -q FETCH_HEAD
           # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
           cp xnu/patches-8796/*.patch dxb/patches/
-          # libfirehose_kernel is built arm64e-only; the BCM2837 kernel is plain arm64
-          sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64"/' dxb/build.sh
+          # libfirehose_kernel is built arm64e-only; the BCM2837 kernel is plain arm64.
+          # Its arm64 slice must also target the Pi 3's Cortex-A53 (ARMv8.0): the default
+          # Apple CPU emits LSE atomics (ldadd), which trap there.
+          sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64" "OTHER_CFLAGS[arch=arm64]=-mcpu=cortex-a53"/' dxb/build.sh
+          grep -c 'OTHER_CFLAGS\[arch=arm64\]=-mcpu=cortex-a53' dxb/build.sh
           grep -c 'VALID_ARCHS="x86_64 arm64e arm64"' dxb/build.sh
           ls dxb/patches
 
