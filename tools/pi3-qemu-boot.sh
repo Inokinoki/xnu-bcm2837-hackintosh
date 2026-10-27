@@ -1,7 +1,7 @@
 #!/bin/sh
 # Boot an xnu-bcm2837 kernel on QEMU raspi3b through the loader.
 #
-#   tools/pi3-qemu-boot.sh KERNEL [SECONDS]
+#   [RAMDISK=image] [CMDLINE=...] tools/pi3-qemu-boot.sh KERNEL [SECONDS]
 #
 # Needs an aarch64 gcc (CC, default aarch64-linux-gnu-gcc), qemu-system-aarch64
 # (QEMU, default qemu-system-aarch64) and python3. The mini UART (what the
@@ -22,7 +22,15 @@ $CC -c -march=armv8-a -mgeneral-regs-only -ffreestanding -fno-builtin \
 $CC -nostdlib -static -T "$HERE/loader/link.ld" -o "$OUT/loader.elf" "$OUT/start.o" "$OUT/main.o"
 
 # 2. payload: the kernel's segments + ADT + command line, placed at PAYLOAD_PA
-python3 "$HERE/tools/mkpi_payload.py" "$KERNEL" "$OUT/payload.bin"
+# RAMDISK=image makes the payload carry a RAM disk root (boot-arg rd=md0);
+# CMDLINE overrides the default boot-args.
+set -- "$KERNEL" "$OUT/payload.bin"
+if [ -n "${RAMDISK:-}" ]; then
+    set -- "$@" --ramdisk "$RAMDISK"
+    : "${CMDLINE:=debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress rd=md0}"
+fi
+[ -n "${CMDLINE:-}" ] && set -- "$@" --cmdline "$CMDLINE"
+python3 "$HERE/tools/mkpi_payload.py" "$@"
 
 # 3. run; QEMU's generic loader puts the payload at 0x3c000000
 rm -f "$OUT/uart1.log"

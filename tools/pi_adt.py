@@ -47,8 +47,12 @@ def serialize(node):
     return bytes(out)
 
 
-def build(dram_base, dram_size, cmdline=''):
-    """Return the ADT blob for a Pi 3 with RAM at [dram_base, dram_base + dram_size)."""
+def build(dram_base, dram_size, cmdline='', ramdisk=None):
+    """Return the ADT blob for a Pi 3 with RAM at [dram_base, dram_base + dram_size).
+
+    ramdisk=(phys, size) adds /chosen/memory-map RAMDisk (two uintptr_t) for
+    IOFindBSDRoot / the md driver (boot-arg rd=md0).
+    """
     root = Node('device-tree')
     root.prop('name', 'device-tree')
     root.prop('compatible', 'raspberrypi,3-model-b')
@@ -64,6 +68,8 @@ def build(dram_base, dram_size, cmdline=''):
 
     mmap = chosen.child('memory-map')
     mmap.prop('name', 'memory-map')
+    if ramdisk:
+        mmap.prop('RAMDisk', struct.pack('<2Q', *ramdisk))
 
     # pmap_compute_max_asids() looks up /defaults; its properties are optional.
     defaults = root.child('defaults')

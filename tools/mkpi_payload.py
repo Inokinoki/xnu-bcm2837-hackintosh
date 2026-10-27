@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pack the xnu kernel Mach-O for the BCM2837 loader (loader/payload.h).
 
-  mkpi_payload.py KERNEL OUT [--cmdline "..."]
+  mkpi_payload.py KERNEL OUT [--cmdline "..."] [--ramdisk IMAGE]
 
 The kernel must have no chained fixups (the BCM2837 build has none); its
 segments are copied as flat bytes to phys_base + (vmaddr - virt_base) by the
@@ -44,7 +44,7 @@ def parse_macho(buf):
     return dict(cputype=cputype, segs=segs, entry=entry)
 
 
-def build(kernel_path, cmdline):
+def build(kernel_path, cmdline, ramdisk_path=None):
     buf = bytearray(open(kernel_path, 'rb').read())
     m = parse_macho(buf)
     segs = [s for s in m['segs'] if s['vmsize']]
@@ -59,7 +59,19 @@ def build(kernel_path, cmdline):
 
     pieces = [(s['vmaddr'], s['vmsize'], bytes(buf[s['fileoff']:s['fileoff'] + s['filesize']])) for s in segs]
 
-    adt_blob = pi_adt.build(PHYS_BASE, MEM_SIZE, cmdline)
+    # A RAM disk is one more segment right after the kernel; kernel_end moves past
+    # it so the kernel does not hand those pages out. The ADT tells the md driver.
+    ramdisk = None
+    if ramdisk_path:
+        image = open(ramdisk_path, 'rb').read()
+        rd_size = (len(image) + PAGE - 1) & ~(PAGE - 1)
+        rd_va = kernel_end
+        kernel_end = rd_va + rd_size
+        assert kernel_end - VIRT_BASE + PHYS_BASE < PHYS_BASE + MEM_SIZE, 'RAM disk does not fit the RAM window'
+        pieces.append((rd_va, rd_size, image))
+        ramdisk = (rd_va - VIRT_BASE + PHYS_BASE, rd_size)
+
+    adt_blob = pi_adt.build(PHYS_BASE, MEM_SIZE, cmdline, ramdisk)
 
     hdr_size = SEG_TABLE + 32 * len(pieces)
     out = bytearray(hdr_size)
@@ -81,6 +93,7 @@ def build(kernel_path, cmdline):
     for i, t in enumerate(seg_table):
         struct.pack_into('<4Q', out, SEG_TABLE + 32 * i, *t)
     info = dict(entry=hex(m['entry']), kernel_end=hex(kernel_end), size=len(out),
+                ramdisk=ramdisk and (hex(ramdisk[0]), hex(ramdisk[1])),
                 segs=[(s['name'], hex(s['vmaddr']), hex(s['vmsize'])) for s in segs])
     return bytes(out), info
 
@@ -89,9 +102,10 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('kernel')
     ap.add_argument('out')
+    ap.add_argument('--ramdisk', help='image placed in RAM, boot with rd=md0')
     ap.add_argument('--cmdline', default='debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress')
     a = ap.parse_args()
-    blob, info = build(a.kernel, a.cmdline)
+    blob, info = build(a.kernel, a.cmdline, a.ramdisk)
     open(a.out, 'wb').write(blob)
     for k, v in info.items():
         if k != 'segs':
