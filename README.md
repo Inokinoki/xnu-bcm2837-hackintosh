@@ -62,3 +62,12 @@ a 64K anonymous mmap is 16K aligned, and a 4K `mprotect` inside a 16K block fail
 pages on top of 4K hardware pages. Real dyld and libsystem are still untested (they need the dyld shared
 cache, about 2 GB, so the root must be on block storage, not a RAM disk).
 
+## Root on the SD card
+
+`bsd/dev/bcm2837_sd.c` (xnu patch 0038) drives the Pi 3 EMMC controller (SDHCI, polled PIO, 1-bit bus)
+and exposes the whole card as `/dev/sdroot0`; boot with `rd=sdroot0`. Patch 0039 lets a non-RAM-disk
+root continue unsealed. On QEMU: `SDIMG=root.img tools/pi3-qemu-boot.sh KERNEL` (the image size must
+be a power of two; `tools/mkhfsroot.py DIR root.img --size 8M` makes a bootable HFS+ one). Read-only use
+is tested (HFS mounts, init runs as PID 1); the write path (CMD24/25), the 4-bit bus, SD clock rates and
+real hardware are untested.
+
