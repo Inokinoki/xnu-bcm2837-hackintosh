@@ -52,3 +52,13 @@ Needs: an aarch64 gcc, `qemu-system-aarch64`, `gdb-multiarch` (optional) and Pyt
 
 The first attempt used xnu-7195.81.3 ([notes](Build/XNU-7195.81.3.md), patches in `xnu/patches-7195.81.3/`).
 It is kept for reference but superseded: iOS 16 userland needs the xnu-8796.141.3 kernel.
+
+## 16K user pages on the 4K kernel
+
+iOS 16 userland is built for 16K pages. `tools/pi-pagesize.S` (build with
+`SRC=pi-pagesize.S tools/mkpi-init.sh OUT`, run as `/sbin/launchd`) shows what a process sees on this
+4K-page kernel (QEMU `raspi3b`): `hw.pagesize` = 0x4000, commpage user page shift = 14 (kernel shift 12),
+a 64K anonymous mmap is 16K aligned, and a 4K `mprotect` inside a 16K block fails. So user maps use 16K
+pages on top of 4K hardware pages. Real dyld and libsystem are still untested (they need the dyld shared
+cache, about 2 GB, so the root must be on block storage, not a RAM disk).
+

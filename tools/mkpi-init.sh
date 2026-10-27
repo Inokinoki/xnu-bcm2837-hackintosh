@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the test PID 1 (tools/pi-init.S) as a static, ad-hoc signed arm64 Mach-O.
+# Build a test PID 1 (SRC=pi-init.S by default, or pi-pagesize.S) as a static, ad-hoc signed arm64 Mach-O.
 #
 #   [CC=aarch64-linux-gnu-gcc] [OBJCOPY=aarch64-linux-gnu-objcopy] tools/mkpi-init.sh OUT
 #
@@ -10,9 +10,10 @@ OUT=${1:?usage: $0 OUT}
 CC=${CC:-aarch64-linux-gnu-gcc}
 OBJCOPY=${OBJCOPY:-aarch64-linux-gnu-objcopy}
 HERE=$(cd "$(dirname "$0")" && pwd)
+SRC=${SRC:-pi-init.S}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-$CC -c -x assembler-with-cpp "$HERE/pi-init.S" -o "$TMP/init.o"
+$CC -c -x assembler-with-cpp "$HERE/${SRC:-pi-init.S}" -o "$TMP/init.o"
 $CC -nostdlib -static -Wl,-Ttext=0 -o "$TMP/init.elf" "$TMP/init.o"
 $OBJCOPY -O binary -j .text "$TMP/init.elf" "$TMP/init.bin"
 python3 -I "$HERE/mkinit.py" "$TMP/init.bin" "$OUT"
