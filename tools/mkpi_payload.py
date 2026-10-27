@@ -20,7 +20,7 @@ CMDLINE = 0x48
 SEG_TABLE = CMDLINE + BOOT_LINE_LENGTH	# 0x2a8
 
 # loader/main.c: the kernel's virtual base and the RAM it gets.
-VIRT_BASE = 0xffffffe006000000
+VIRT_BASE = 0xfffffff006000000
 PHYS_BASE = 0x10000000
 MEM_SIZE = 0x2c000000
 

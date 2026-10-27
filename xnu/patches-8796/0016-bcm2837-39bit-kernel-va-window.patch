@@ -1,16 +1,18 @@
 --- a/makedefs/MakeInc.def
 +++ b/makedefs/MakeInc.def
-@@ -338,6 +338,15 @@
+@@ -338,6 +338,17 @@
  ARM64_LINK_ADDR    =0xfffffe0007004000
  endif
  
-+# BCM2837 (Raspberry Pi 3, 1 GiB) uses the 39-bit kernel VA window that its 4K
-+# T1SZ_BOOT maps (0xffffffe0_00000000). ARM_LARGE_MEMORY would put the link
-+# address at 0xfffffe0007004000, outside that window.
++# BCM2837 (Raspberry Pi 3, 1 GiB, 4K pages) uses the standard non-large-memory
++# layout: the kernel links above LOW_GLOBAL_BASE_ADDRESS (0xfffffff000000000),
++# the base the VM pointer packing and the kmem ranges use. ARM_LARGE_MEMORY
++# (set for every MacOSX target) would link at 0xfffffe0007004000, outside the
++# 39-bit window of the 4K T1SZ_BOOT.
 +ifeq ($(CURRENT_MACHINE_CONFIG),BCM2837)
 +LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY
-+ARM64_PLKSEG_ADDR  =0xffffffe004004000
-+ARM64_LINK_ADDR    =0xffffffe007004000
++ARM64_PLKSEG_ADDR  =0xfffffff004004000
++ARM64_LINK_ADDR    =0xfffffff007004000
 +endif
 +
  

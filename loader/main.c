@@ -29,7 +29,7 @@
 #define mmio_r(a)	(*(volatile uint32_t *)(a))
 
 /* Kernel placement: virt_base is 32 MB below the Mach-O header (16K L2 block). */
-#define KERNEL_VIRT_BASE	0xffffffe006000000ULL
+#define KERNEL_VIRT_BASE	0xfffffff006000000ULL
 #define KERNEL_PHYS_BASE	0x10000000ULL
 #define KERNEL_MEM_SIZE		0x2c000000ULL	/* 0x10000000..0x3c000000, below the payload */
 
