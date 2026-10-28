@@ -44,7 +44,7 @@ timeout "$SECS" "$QEMU" -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
     ${SDIMG:+-drive file="$SDIMG",if=sd,format=raw${SDSNAPSHOT:+,snapshot=on}} \
     -display none -serial null -serial file:"$OUT/uart1.log" \
-    -D "$OUT/qemu.log" -d int,guest_errors -no-reboot
+    -D "$OUT/qemu.log" -d ${QEMU_DEBUG:-guest_errors} -no-reboot
 rc=$?
 set -e
 echo "qemu exit=$rc (124 = still running at the timeout)"
