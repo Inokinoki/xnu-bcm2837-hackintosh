@@ -102,3 +102,15 @@ Bring-up notes that cost time: QEMU's generic counter runs at 62.5 MHz (the load
 the ADT, otherwise every timeout fires 3x early); `host_set_multiuser_config_flags` must work on this macOS-config
 kernel (patch 0063) or lsd waits forever for the foreground uid; the kernel process sampler (patch 0061) plus
 `tools/dsc-sym.sh` (function names from the shared cache) is how those were found.
+
+## Input (work in progress)
+
+The kernel has HID event services for the iOS userland (xnu patches 0064/0065: IOHIDFamily sources staged from
+Apple's repo, `BCM2837HIDTouch`, `BCM2837HIDButtons`). On QEMU raspi3b, which has no touch screen, `BCM2837HIDUart`
+reads text commands from the PL011 UART (`HID=1 tools/pi3-qemu-boot.sh ...`, then `tools/qemu-touch.py SOCK swipe|tap|key`).
+Edge touches carry kIOHIDDigitizerEventFromEdgeTip as UIKit expects. State: backboardd opens both services and the
+events reach the kernel and the user client, but **no visible reaction on the lock screen yet**: after the first
+~15 frames the display stops updating at all (the lock screen clock freezes). `AppleCLCD`'s vsync-notification
+selector (72) is never called by backboardd, which is the main suspect (CoreAnimation's display link needs it).
+QEMU snapshots (`savevm`, `LOADVM=`) work on raspi3b and help repeat gesture tests.
+
