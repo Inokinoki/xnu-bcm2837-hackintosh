@@ -51,6 +51,7 @@ if [ -n "${HID:-}" ]; then
     HIDSERIAL="unix:$OUT/hid.sock,server=on,wait=off"
 fi
 set +e
+# LOADVM=tag restores a QEMU snapshot made with tools/qemu-monitor.py SOCK "savevm tag" (needs a qcow2 SD).
 # SCREENDUMP=dir[:seconds]: save a screenshot (PPM) of the guest display every N seconds (default 60).
 if [ -n "${SCREENDUMP:-}" ]; then
     SDDIR=${SCREENDUMP%%:*}
@@ -62,7 +63,7 @@ if [ -n "${SCREENDUMP:-}" ]; then
     SDPID=$!
     MONITOR="-monitor unix:$OUT/mon.sock,server,nowait"
 fi
-timeout "$SECS" "$QEMU" ${MONITOR:-} -M raspi3b -kernel "$OUT/loader.elf" \
+timeout "$SECS" "$QEMU" ${MONITOR:-} ${LOADVM:+-loadvm "$LOADVM"} -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
     ${SDIMG:+-drive file="$SDIMG",if=sd,format=${SDFORMAT:-raw}${SDSNAPSHOT:+,snapshot=on}} \
     -display none -serial "${HIDSERIAL:-null}" -serial file:"$OUT/uart1.log" \

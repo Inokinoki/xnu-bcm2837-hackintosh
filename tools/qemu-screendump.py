@@ -15,22 +15,32 @@ for _ in range(200):
     if os.path.exists(sock_path):
         break
     time.sleep(0.1)
-s = socket.socket(socket.AF_UNIX)
-s.connect(sock_path)
-s.settimeout(5)
-try:
-    s.recv(4096)
-except OSError:
-    pass
+
+
+def hmp(cmd):
+    """One HMP command on a fresh connection (the monitor socket takes one client at a time)."""
+    s = socket.socket(socket.AF_UNIX)
+    s.settimeout(10)
+    s.connect(sock_path)
+    try:
+        s.recv(4096)
+        s.sendall((cmd + '\n').encode())
+        time.sleep(0.5)
+        s.recv(4096)
+    finally:
+        s.close()
+
+
 n = 0
 while True:
     time.sleep(every)
     path = os.path.abspath(os.path.join(outdir, f'shot-{n:03d}.ppm'))
     try:
-        s.sendall(f'screendump {path}\n'.encode())
-        s.recv(4096)
-    except OSError:
-        break
+        hmp(f'screendump {path}')
+    except (OSError, ConnectionError):
+        if not os.path.exists(sock_path):
+            break
+        continue
     if os.path.exists(path):
         shutil.copyfile(path, os.path.join(outdir, 'last.ppm'))
     n += 1
