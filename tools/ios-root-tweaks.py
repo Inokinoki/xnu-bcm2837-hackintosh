@@ -64,7 +64,9 @@ def launchd(root):
         if '_PanicOnCrash' in job:
             job['_PanicOnCrasX'] = job.pop('_PanicOnCrash')
             renamed += 1
-    removed = [k for k, j in jobs.items() if 'CommCenter' in k or 'CommCenter' in str(j.get('Label', ''))]
+    # no baseband, bluetooth or FairPlay hardware here: they crash-loop and burn the CPU of an emulated Pi
+    drop = ('CommCenter', 'bluetoothd', 'fairplayd')
+    removed = [k for k, j in jobs.items() if any(d in k or d in str(j.get('Label', '')) for d in drop)]
     for k in removed:
         del jobs[k]
     save(path, plist, st.st_uid, st.st_gid, st.st_mode & 0o7777)
