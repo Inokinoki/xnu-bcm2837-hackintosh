@@ -88,11 +88,17 @@ dyld use `/System/Library/Caches/com.apple.dyld` (the image has hard links there
 `launchd_unsecure_cache=1` (a number, not a path) so `launchd_cache_loader` accepts the unsigned launchd.plist
 and skips the AMFI lookup. The image carries `tools/ios-root-tweaks.py`'s changes (`_PanicOnCrash` renamed).
 
-Observed on QEMU `raspi3b` (xnu patches 0040-0048): Apple's launchd (Darwin Bootstrapper 7.0.0) maps the dyld
-shared cache (16K code signature pages are accepted, not verified: patch 0040), runs all its boot tasks
-(fsck, mount, data protection, MSU, corecrypto FIPS self test, keybag, launchd_cache_loader), finishes early boot
-and starts the regular daemons: xpcproxy, watchdogd, SpringBoard, backboardd, mediaserverd, mDNSResponder,
-bluetoothd, lockdownd, locationd ... In a 15 minute run there is no kernel panic, but SpringBoard, backboardd
-and mediaserverd crash-loop ("Too many corpses being created"): there is no display, IOSurface, HID or GPU
-driver. Not done: those drivers (the Pi 3 has a VideoCore mailbox framebuffer), a real AppleMobileFileIntegrity,
-networking; no hardware test. It is slow (QEMU TCG: minutes to early boot).
+Observed on QEMU `raspi3b` (xnu patches 0040-0063): Apple's launchd (Darwin Bootstrapper 7.0.0) maps the dyld
+shared cache (16K code signature pages are accepted, not verified: patch 0040), runs all its boot tasks and the
+regular daemons, and **SpringBoard draws the iOS 16 lock screen** (date, clock, battery, camera button) through
+CoreAnimation, backboardd, our built-in IOSurface/IOMobileFramebuffer (`AppleCLCD`) and the VideoCore framebuffer
+the loader allocates (`FB=1125x2436 IOS_DT=d22ap.adt`, see `tools/pi3-qemu-boot.sh`; the iPhone X device tree is an
+Apple artifact: `tools/im4p-extract.py`). It takes about 50 minutes of QEMU TCG time on a single core to get there
+the first time (LaunchServices builds its database; use a qcow2 overlay, `SDFORMAT=qcow2`, to keep the state).
+Not done: input (no HID), anything past the lock screen, a real AppleMobileFileIntegrity, networking, more than
+one CPU, and any test on real hardware.
+
+Bring-up notes that cost time: QEMU's generic counter runs at 62.5 MHz (the loader now measures it and patches
+the ADT, otherwise every timeout fires 3x early); `host_set_multiuser_config_flags` must work on this macOS-config
+kernel (patch 0063) or lsd waits forever for the foreground uid; the kernel process sampler (patch 0061) plus
+`tools/dsc-sym.sh` (function names from the shared cache) is how those were found.
