@@ -36,7 +36,7 @@ diff --git a/iokit/Kernel/arm/hid/BCM2837HID.cpp b/iokit/Kernel/arm/hid/BCM2837H
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/hid/BCM2837HID.cpp
-@@ -0,0 +1,657 @@
+@@ -0,0 +1,671 @@
 +/*
 + * BCM2837: HID event services for the iOS userland (backboardd's HID event
 + * system).
@@ -388,6 +388,13 @@ new file mode 100644
 + * absolute digitizers.
 + */
 +#define BCM2837_TOUCH_FINGERS 10
++/*
++ * Contacts that start this close to a panel edge (pixels, about 3 mm) carry
++ * kIOHIDDigitizerEventFromEdgeTip for their whole life, as Apple's touch firmware
++ * reports them. UIKit derives UITouch's edge type from that bit
++ * (_UIEventHIDTouchEdgeTypeForHIDEvent); without it there is no home or app-switcher gesture.
++ */
++#define BCM2837_TOUCH_EDGE_PX 48
 +class BCM2837HIDTouch : public IOHIDEventService {
 +	OSDeclareDefaultStructors(BCM2837HIDTouch);
 +public:
@@ -400,6 +407,7 @@ new file mode 100644
 +private:
 +	IOLock *fLock;
 +	bool fDown[BCM2837_TOUCH_FINGERS];
++	bool fEdge[BCM2837_TOUCH_FINGERS];
 +	IOFixed fX[BCM2837_TOUCH_FINGERS];
 +	IOFixed fY[BCM2837_TOUCH_FINGERS];
 +};
@@ -504,6 +512,11 @@ new file mode 100644
 +		return;
 +	}
 +
++	if (!was && down) {
++		fEdge[finger] = x < BCM2837_TOUCH_EDGE_PX || x > (int)gPanelW - 1 - BCM2837_TOUCH_EDGE_PX ||
++		    y < BCM2837_TOUCH_EDGE_PX || y > (int)gPanelH - 1 - BCM2837_TOUCH_EDGE_PX;
++	}
++
 +	collection = IOHIDEvent::digitizerEvent(now, 0, kIOHIDDigitizerTransducerTypeHand, false, 0, 0, 0);
 +	if (!collection) {
 +		IOLockUnlock(fLock);
@@ -524,7 +537,7 @@ new file mode 100644
 +		if (!child) {
 +			continue;
 +		}
-+		UInt32 mask = 0;
++		UInt32 mask = fEdge[i] ? kIOHIDDigitizerEventFromEdgeTip : 0;
 +		if (i == finger) {
 +			if (was != down) {
 +				mask |= kIOHIDDigitizerEventTouch | kIOHIDDigitizerEventRange;
@@ -559,7 +572,8 @@ new file mode 100644
 +	IOLockUnlock(fLock);
 +
 +	if (was != down) {
-+		IOLog("BCM2837 HID: touch %d %s at %d,%d\n", finger, down ? "down" : "up", x, y);
++		IOLog("BCM2837 HID: touch %d %s at %d,%d%s\n", finger, down ? "down" : "up", x, y,
++		    fEdge[finger] ? " edge" : "");
 +	}
 +	dispatchEvent(collection);
 +	collection->release();
