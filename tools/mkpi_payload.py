@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pack the xnu kernel Mach-O for the BCM2837 loader (loader/payload.h).
 
-  mkpi_payload.py KERNEL OUT [--cmdline "..."] [--ramdisk IMAGE]
+  mkpi_payload.py KERNEL OUT [--cmdline "..."] [--ramdisk IMAGE] [--fb WxH] [--ios-dt D22AP.adt]
 
 The kernel must have no chained fixups (the BCM2837 build has none); its
 segments are copied as flat bytes to phys_base + (vmaddr - virt_base) by the
@@ -44,7 +44,7 @@ def parse_macho(buf):
     return dict(cputype=cputype, segs=segs, entry=entry)
 
 
-def build(kernel_path, cmdline, ramdisk_path=None):
+def build(kernel_path, cmdline, ramdisk_path=None, fb=None, ios_dt=None):
     buf = bytearray(open(kernel_path, 'rb').read())
     m = parse_macho(buf)
     segs = [s for s in m['segs'] if s['vmsize']]
@@ -71,7 +71,13 @@ def build(kernel_path, cmdline, ramdisk_path=None):
         pieces.append((rd_va, rd_size, image))
         ramdisk = (rd_va - VIRT_BASE + PHYS_BASE, rd_size)
 
-    adt_blob = pi_adt.build(PHYS_BASE, MEM_SIZE, cmdline, ramdisk)
+    display = None
+    if fb:
+        # the loader reads fb=WxH from the boot-args and asks the VideoCore for that framebuffer
+        w, h = (int(v) for v in fb.lower().split('x'))
+        display = (w, h)
+        cmdline = (cmdline + f' fb={w}x{h}').strip()
+    adt_blob = pi_adt.build(PHYS_BASE, MEM_SIZE, cmdline, ramdisk, display, ios_dt)
 
     hdr_size = SEG_TABLE + 32 * len(pieces)
     out = bytearray(hdr_size)
@@ -103,9 +109,11 @@ if __name__ == '__main__':
     ap.add_argument('kernel')
     ap.add_argument('out')
     ap.add_argument('--ramdisk', help='image placed in RAM, boot with rd=md0')
+    ap.add_argument('--fb', help='WxH: framebuffer from the VideoCore (loader), ADT /arm-io/disp0')
+    ap.add_argument('--ios-dt', help='raw iPhone X (D22AP) device tree: iPhone10,3 identity and /product (Apple artifact, not in git)')
     ap.add_argument('--cmdline', default='debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress')
     a = ap.parse_args()
-    blob, info = build(a.kernel, a.cmdline, a.ramdisk)
+    blob, info = build(a.kernel, a.cmdline, a.ramdisk, a.fb, a.ios_dt)
     open(a.out, 'wb').write(blob)
     for k, v in info.items():
         if k != 'segs':

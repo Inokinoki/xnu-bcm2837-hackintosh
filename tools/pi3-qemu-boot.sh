@@ -35,17 +35,33 @@ if [ -n "${SDIMG:-}" ]; then
     : "${CMDLINE:=debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress rd=sdroot0}"
 fi
 [ -n "${CMDLINE:-}" ] && set -- "$@" --cmdline "$CMDLINE"
+# FB=WxH: the loader asks the VideoCore for a framebuffer, the ADT gets /arm-io/disp0.
+[ -n "${FB:-}" ] && set -- "$@" --fb "$FB"
+# IOS_DT=d22ap.adt: look like the iPhone X (see tools/im4p-extract.py for getting that device tree).
+[ -n "${IOS_DT:-}" ] && set -- "$@" --ios-dt "$IOS_DT"
 python3 "$HERE/tools/mkpi_payload.py" "$@"
 
 # 3. run; QEMU's generic loader puts the payload at 0x3c000000
 rm -f "$OUT/uart1.log"
 set +e
-timeout "$SECS" "$QEMU" -M raspi3b -kernel "$OUT/loader.elf" \
+# SCREENDUMP=dir[:seconds]: save a screenshot (PPM) of the guest display every N seconds (default 60).
+if [ -n "${SCREENDUMP:-}" ]; then
+    SDDIR=${SCREENDUMP%%:*}
+    SDEVERY=60
+    case "$SCREENDUMP" in *:*) SDEVERY=${SCREENDUMP##*:};; esac
+    mkdir -p "$SDDIR"
+    rm -f "$OUT/mon.sock"
+    python3 "$HERE/tools/qemu-screendump.py" "$OUT/mon.sock" "$SDDIR" "$SDEVERY" &
+    SDPID=$!
+    MONITOR="-monitor unix:$OUT/mon.sock,server,nowait"
+fi
+timeout "$SECS" "$QEMU" ${MONITOR:-} -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
     ${SDIMG:+-drive file="$SDIMG",if=sd,format=raw${SDSNAPSHOT:+,snapshot=on}} \
     -display none -serial null -serial file:"$OUT/uart1.log" \
     -D "$OUT/qemu.log" -d ${QEMU_DEBUG:-guest_errors} -no-reboot
 rc=$?
+[ -n "${SDPID:-}" ] && kill "$SDPID" 2>/dev/null
 set -e
 echo "qemu exit=$rc (124 = still running at the timeout)"
 echo "uart1 log: $OUT/uart1.log"

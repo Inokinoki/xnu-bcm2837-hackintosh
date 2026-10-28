@@ -20,6 +20,13 @@
 #define GPPUD		(MMIO_BASE + 0x200094)
 #define GPPUDCLK0	(MMIO_BASE + 0x200098)
 
+#define MBOX_BASE	(MMIO_BASE + 0xb880)
+#define MBOX_READ	(MBOX_BASE + 0x00)
+#define MBOX_STATUS	(MBOX_BASE + 0x18)
+#define MBOX_WRITE	(MBOX_BASE + 0x20)
+#define MBOX_FULL	0x80000000u
+#define MBOX_EMPTY	0x40000000u
+
 #define RNG_BASE	(MMIO_BASE + 0x104000)
 #define RNG_CTRL	(RNG_BASE + 0x00)
 #define RNG_STATUS	(RNG_BASE + 0x04)
@@ -173,6 +180,78 @@ static int magic_ok(const char *m)
 	return 1;
 }
 
+
+/* ---- VideoCore framebuffer (mailbox property channel), enabled by "fb=WxH" in the boot-args ---- */
+static volatile uint32_t mbox[64] __attribute__((aligned(16)));
+
+static int mbox_call(void)
+{
+	uint32_t r = ((uint32_t)(uintptr_t)mbox & ~0xfu) | 8;	/* channel 8: ARM to VC property tags */
+	for (unsigned t = 0; mmio_r(MBOX_STATUS) & MBOX_FULL; t++)
+		if (t > 10000000) return 0;
+	mmio_w(MBOX_WRITE, r);
+	for (unsigned t = 0; t < 10000000; t++) {
+		if (mmio_r(MBOX_STATUS) & MBOX_EMPTY)
+			continue;
+		if (mmio_r(MBOX_READ) == r)
+			return mbox[1] == 0x80000000u;
+	}
+	return 0;
+}
+
+static unsigned parse_dec(const char **pp)
+{
+	unsigned v = 0;
+	while (**pp >= '0' && **pp <= '9')
+		v = v * 10 + (unsigned)(*(*pp)++ - '0');
+	return v;
+}
+
+/* Find "fb=WxH" in the command line. */
+static int find_fb_size(const char *cl, unsigned *w, unsigned *h)
+{
+	for (const char *start = cl; *cl; cl++) {
+		if (cl[0] == 'f' && cl[1] == 'b' && cl[2] == '=' && (cl == start || cl[-1] == ' ')) {
+			const char *q = cl + 3;
+			*w = parse_dec(&q);
+			if (*q != 'x')
+				return 0;
+			q++;
+			*h = parse_dec(&q);
+			return *w && *h;
+		}
+	}
+	return 0;
+}
+
+struct fbinfo {
+	uint64_t base, pitch;
+	unsigned w, h;
+};
+
+static int fb_init(unsigned w, unsigned h, struct fbinfo *fb)
+{
+	unsigned i = 0;
+	mbox[i++] = 0; mbox[i++] = 0;				/* size (patched), request */
+	mbox[i++] = 0x00048003; mbox[i++] = 8; mbox[i++] = 8; mbox[i++] = w; mbox[i++] = h;	/* physical w/h */
+	mbox[i++] = 0x00048004; mbox[i++] = 8; mbox[i++] = 8; mbox[i++] = w; mbox[i++] = h;	/* virtual w/h */
+	mbox[i++] = 0x00048005; mbox[i++] = 4; mbox[i++] = 4; mbox[i++] = 32;		/* depth */
+	mbox[i++] = 0x00048006; mbox[i++] = 4; mbox[i++] = 4; mbox[i++] = 0;		/* pixel order: BGR (B first in memory) */
+	unsigned alloc = i;
+	mbox[i++] = 0x00040001; mbox[i++] = 8; mbox[i++] = 8; mbox[i++] = 16; mbox[i++] = 0;	/* allocate: align, -> base, size */
+	unsigned pitch = i;
+	mbox[i++] = 0x00040008; mbox[i++] = 4; mbox[i++] = 4; mbox[i++] = 0;		/* pitch */
+	mbox[i++] = 0;						/* end tag */
+	mbox[0] = i * 4;
+	if (!mbox_call())
+		return 0;
+	fb->base = mbox[alloc + 3] & 0x3fffffffu;		/* bus address -> ARM physical */
+	fb->pitch = mbox[pitch + 3];
+	fb->w = w;
+	fb->h = h;
+	return fb->base != 0 && fb->pitch >= w * 4;
+}
+
 typedef void (*kernel_entry_t)(uint64_t boot_args_pa);
 
 void loader_main(uint64_t dtb)
@@ -225,7 +304,25 @@ void loader_main(uint64_t dtb)
 	ba->physBase = p->phys_base;
 	ba->memSize = p->mem_size;
 	ba->topOfKernelData = top;
-	ba->Video.v_display = 0;		/* no framebuffer on this path yet */
+	ba->Video.v_display = 0;
+	{
+		unsigned fw, fh;
+		struct fbinfo fb;
+		if (find_fb_size(p->cmdline, &fw, &fh) && fb_init(fw, fh, &fb)) {
+			/* QEMU places the payload where the VideoCore RAM starts: start from a black screen */
+			zero64(fb.base, fb.pitch * fb.h);
+			uart_line("framebuffer", fb.base);
+			uart_line("fb pitch", fb.pitch);
+			ba->Video.v_baseAddr = fb.base;
+			ba->Video.v_display = 1;
+			ba->Video.v_rowBytes = fb.pitch;
+			ba->Video.v_width = fb.w;
+			ba->Video.v_height = fb.h;
+			ba->Video.v_depth = 32;
+		} else {
+			uart_puts("[loader] no framebuffer\n");
+		}
+	}
 	ba->machineType = 0;
 	ba->deviceTreeP = adt_pa - pa_of_va;	/* xnu reads it with the MMU on: a VA */
 	ba->deviceTreeLength = (uint32_t)p->adt_size;
