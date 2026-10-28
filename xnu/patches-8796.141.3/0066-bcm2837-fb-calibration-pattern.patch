@@ -1,0 +1,45 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -165,6 +165,42 @@
+ 	fFlushTicks = (hz == 0 || hz >= 60) ? 1 : 60 / hz;
+ 	fVsync->setTimeoutUS(BCM2837_FB_VSYNC_US);
+ 
++	/*
++	 * boot-arg sweetfb_pattern=1: draw a calibration pattern into the framebuffer before userland
++	 * runs, to check the address, pitch, alignment and channel order of the display path on its own
++	 * (a grid every 125 px, a 4 px white border, red/green/blue/yellow squares in the top-left/
++	 * top-right/bottom-left/bottom-right corners, a magenta cross through the centre).
++	 */
++	int pattern = 0;
++	if (PE_parse_boot_argn("sweetfb_pattern", &pattern, sizeof(pattern)) && pattern) {
++		for (uint32_t y = 0; y < fHeight; y++) {
++			uint32_t *row = (uint32_t *)(fPixels + (uintptr_t)y * fRowBytes);
++			for (uint32_t x = 0; x < fWidth; x++) {
++				uint32_t c = 0xff202020;                        /* 0xAARRGGBB: B,G,R,A in memory */
++				if ((x % 125) == 0 || (y % 125) == 0) {
++					c = 0xff506090;
++				}
++				if (x == fWidth / 2 || y == fHeight / 2) {
++					c = 0xffff00ff;
++				}
++				if (x < 4 || y < 4 || x >= fWidth - 4 || y >= fHeight - 4) {
++					c = 0xffffffff;
++				} else if (x >= 4 && x < 104 && y >= 4 && y < 104) {
++					c = 0xffff0000;
++				} else if (x >= fWidth - 104 && x < fWidth - 4 && y >= 4 && y < 104) {
++					c = 0xff00ff00;
++				} else if (x >= 4 && x < 104 && y >= fHeight - 104 && y < fHeight - 4) {
++					c = 0xff0000ff;
++				} else if (x >= fWidth - 104 && x < fWidth - 4 && y >= fHeight - 104 && y < fHeight - 4) {
++					c = 0xffffff00;
++				}
++				row[x] = c;
++			}
++		}
++		IOLog("BCM2837 FB: calibration pattern drawn (%ux%u, %u bytes per row, at 0x%llx)\n",
++		    fWidth, fHeight, fRowBytes, fPhys);
++	}
++
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
