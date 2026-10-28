@@ -44,6 +44,12 @@ python3 "$HERE/tools/mkpi_payload.py" "$@"
 
 # 3. run; QEMU's generic loader puts the payload at 0x3c000000
 rm -f "$OUT/uart1.log"
+# HID=1: the PL011 UART (guest uart0) listens on $OUT/hid.sock for the guest's input commands
+# (tools/qemu-touch.py sends taps, swipes and keys; xnu patch 0065, BCM2837HIDUart).
+if [ -n "${HID:-}" ]; then
+    rm -f "$OUT/hid.sock"
+    HIDSERIAL="unix:$OUT/hid.sock,server=on,wait=off"
+fi
 set +e
 # SCREENDUMP=dir[:seconds]: save a screenshot (PPM) of the guest display every N seconds (default 60).
 if [ -n "${SCREENDUMP:-}" ]; then
@@ -59,7 +65,7 @@ fi
 timeout "$SECS" "$QEMU" ${MONITOR:-} -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
     ${SDIMG:+-drive file="$SDIMG",if=sd,format=${SDFORMAT:-raw}${SDSNAPSHOT:+,snapshot=on}} \
-    -display none -serial null -serial file:"$OUT/uart1.log" \
+    -display none -serial "${HIDSERIAL:-null}" -serial file:"$OUT/uart1.log" \
     -D "$OUT/qemu.log" -d ${QEMU_DEBUG:-guest_errors} -no-reboot
 rc=$?
 [ -n "${SDPID:-}" ] && kill "$SDPID" 2>/dev/null

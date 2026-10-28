@@ -1,0 +1,803 @@
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -15,3 +15,7 @@
+ iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetSurface.cpp                                optional iokitcpp
+ iokit/Kernel/arm/SweetFramebuffer.cpp                            optional iokitcpp
++iokit/Kernel/arm/hid/BCM2837HID.cpp                                optional iokitcpp
++iokit/Kernel/arm/hid/IOHIDEvent.cpp                              optional iokitcpp
++iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp                  optional iokitcpp
++iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp             optional iokitcpp
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -67,6 +67,21 @@
+     "     'IOProviderClass' = IOPlatformDevice;"
+     "     'IONameMatch'     = 'bcm2837,display';"
+     "   },"
++    "   {"
++    "     'IOClass'         = BCM2837HIDButtons;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = BCM2837HIDButtons;"
++    "   },"
++    "   {"
++    "     'IOClass'         = BCM2837HIDTouch;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = BCM2837HIDTouch;"
++    "   },"
++    "   {"
++    "     'IOClass'         = BCM2837HIDUart;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = BCM2837HIDUart;"
++    "   },"
+ #endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+diff --git a/iokit/Kernel/arm/hid/BCM2837HID.cpp b/iokit/Kernel/arm/hid/BCM2837HID.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/hid/BCM2837HID.cpp
+@@ -0,0 +1,657 @@
++/*
++ * BCM2837: HID event services for the iOS userland (backboardd's HID event
++ * system).
++ *
++ * backboardd watches for IOService objects with HIDServiceSupport = true,
++ * opens them with IOServiceOpen type 'esuc' (IOHIDEventServiceUserClient,
++ * compiled here from IOHIDFamily-1915.140.3, the version the iOS 16.7
++ * userland ships) and reads serialized IOHIDEvents from the user client's
++ * shared queue. This file has the minimal IOHIDEventService base class and
++ * two services:
++ *
++ *   BCM2837HIDButtons  consumer-control keys (power, volume, home)
++ *   BCM2837HIDTouch    the built-in touch screen (digitizer collections)
++ *
++ * Input drivers (BCM2837HIDUart: commands on the PL011 serial port) feed them through the C entry points bcm2837_hid_key()
++ * and bcm2837_hid_touch(). Boot-arg sweethidtest=N (seconds) presses Home
++ * every N seconds, to test the event path without input hardware.
++ */
++#include <IOKit/IOLib.h>
++#include <IOKit/IOService.h>
++#include <IOKit/IOTimerEventSource.h>
++#include <libkern/c++/OSArray.h>
++#include <pexpert/pexpert.h>
++#include <libkern/libkern.h>
++
++#include "IOHIDEventService.h"
++#include "IOHIDEventServiceUserClient.h"
++#include "IOHIDEvent.h"
++#include "IOHIDKeys.h"
++#include "IOHIDPrivateKeys.h"
++#include "IOHIDUsageTables.h"
++
++extern "C" uint64_t mach_absolute_time(void);
++
++/* One open client: the user client and its event callback. */
++class IOHIDEventServiceClient : public OSObject {
++	OSDeclareDefaultStructors(IOHIDEventServiceClient);
++public:
++	bool                       initClient() { return OSObject::init(); }
++	IOService                 *client;
++	void                      *context;
++	IOHIDEventService::Action  action;
++};
++OSDefineMetaClassAndStructors(IOHIDEventServiceClient, OSObject);
++
++#define super IOService
++OSDefineMetaClassAndStructors(IOHIDEventService, IOService);
++
++bool
++IOHIDEventService::start(IOService *provider)
++{
++	if (!super::start(provider)) {
++		return false;
++	}
++	_clientLock = IOLockAlloc();
++	_clients = OSArray::withCapacity(2);
++	_hidWorkLoop = getWorkLoop();
++	if (!_clientLock || !_clients || !_hidWorkLoop) {
++		return false;
++	}
++	_hidWorkLoop->retain();
++	_hidGate = IOCommandGate::commandGate(this);
++	if (!_hidGate || _hidWorkLoop->addEventSource(_hidGate) != kIOReturnSuccess) {
++		return false;
++	}
++
++	OSString *transport = getTransport();
++	OSString *product = getProduct();
++	setProperty(kIOHIDTransportKey, transport);
++	setProperty(kIOHIDProductKey, product);
++	setProperty(kIOHIDManufacturerKey, "BCM2837");
++	setProperty(kIOHIDVendorIDKey, getVendorID(), 32);
++	setProperty(kIOHIDProductIDKey, getProductID(), 32);
++	setProperty(kIOHIDLocationIDKey, (unsigned long long)getProductID(), 32);
++	setProperty(kIOHIDReportIntervalKey, getReportInterval(), 32);
++	setProperty(kIOHIDPrimaryUsagePageKey, getPrimaryUsagePage(), 32);
++	setProperty(kIOHIDPrimaryUsageKey, getPrimaryUsage(), 32);
++	setProperty(kIOHIDBuiltInKey, kOSBooleanTrue);
++	OSSafeReleaseNULL(transport);
++	OSSafeReleaseNULL(product);
++
++	OSDictionary *pair = OSDictionary::withCapacity(2);
++	OSArray *pairs = OSArray::withCapacity(1);
++	OSNumber *page = OSNumber::withNumber(getPrimaryUsagePage(), 32);
++	OSNumber *usage = OSNumber::withNumber(getPrimaryUsage(), 32);
++	if (pair && pairs && page && usage) {
++		pair->setObject(kIOHIDDeviceUsagePageKey, page);
++		pair->setObject(kIOHIDDeviceUsageKey, usage);
++		pairs->setObject(pair);
++		setProperty(kIOHIDDeviceUsagePairsKey, pairs);
++	}
++	OSSafeReleaseNULL(pair);
++	OSSafeReleaseNULL(pairs);
++	OSSafeReleaseNULL(page);
++	OSSafeReleaseNULL(usage);
++
++	/* What IOHIDFamily's "IOHIDEventServiceUserClient" personality merges in. */
++	setProperty("HIDServiceSupport", kOSBooleanTrue);
++	setProperty("IOUserClientClass", "IOHIDEventServiceUserClient");
++	return true;
++}
++
++void
++IOHIDEventService::free(void)
++{
++	if (_hidGate && _hidWorkLoop) {
++		_hidWorkLoop->removeEventSource(_hidGate);
++	}
++	OSSafeReleaseNULL(_hidGate);
++	OSSafeReleaseNULL(_hidWorkLoop);
++	OSSafeReleaseNULL(_clients);
++	if (_clientLock) {
++		IOLockFree(_clientLock);
++		_clientLock = NULL;
++	}
++	super::free();
++}
++
++bool
++IOHIDEventService::open(IOService *client, IOOptionBits options, void *context, Action action)
++{
++	IOHIDEventServiceClient *data = OSTypeAlloc(IOHIDEventServiceClient);
++	bool ok = false;
++
++	if (data && data->initClient()) {
++		data->client = client;
++		data->context = context;
++		data->action = action;
++		ok = super::open(client, options, data);
++	}
++	OSSafeReleaseNULL(data);
++	IOLog("BCM2837 HID: %s open by %s -> %d\n", getName(), client ? client->getName() : "?", ok);
++	return ok;
++}
++
++void
++IOHIDEventService::close(IOService *forClient, IOOptionBits options)
++{
++	super::close(forClient, options);
++}
++
++bool
++IOHIDEventService::handleOpen(IOService *client, IOOptionBits options __unused, void *argument)
++{
++	IOHIDEventServiceClient *data = OSDynamicCast(IOHIDEventServiceClient, (OSObject *)argument);
++	bool ok = false;
++
++	if (!data) {
++		return false;
++	}
++	IOLockLock(_clientLock);
++	if (!handleIsOpenLocked(client)) {
++		/* Copy on write: dispatchEvent iterates a snapshot without the lock. */
++		OSArray *next = OSArray::withArray(_clients, _clients->getCount() + 1);
++		if (next && next->setObject(data)) {
++			_clients->release();
++			_clients = next;
++			ok = true;
++		} else {
++			OSSafeReleaseNULL(next);
++		}
++	}
++	IOLockUnlock(_clientLock);
++	return ok;
++}
++
++void
++IOHIDEventService::handleClose(IOService *client, IOOptionBits options __unused)
++{
++	IOLockLock(_clientLock);
++	OSArray *next = OSArray::withCapacity(_clients->getCount());
++	if (next) {
++		for (unsigned int i = 0; i < _clients->getCount(); i++) {
++			IOHIDEventServiceClient *data = (IOHIDEventServiceClient *)_clients->getObject(i);
++			if (data->client != client) {
++				next->setObject(data);
++			}
++		}
++		_clients->release();
++		_clients = next;
++	}
++	IOLockUnlock(_clientLock);
++}
++
++bool
++IOHIDEventService::handleIsOpenLocked(const IOService *client) const
++{
++	for (unsigned int i = 0; i < _clients->getCount(); i++) {
++		IOHIDEventServiceClient *data = (IOHIDEventServiceClient *)_clients->getObject(i);
++		if (client == NULL || data->client == client) {
++			return true;
++		}
++	}
++	return false;
++}
++
++bool
++IOHIDEventService::handleIsOpen(const IOService *client) const
++{
++	IOLockLock(_clientLock);
++	bool open = handleIsOpenLocked(client);
++	IOLockUnlock(_clientLock);
++	return open;
++}
++
++void
++IOHIDEventService::dispatchEvent(IOHIDEvent *event, IOOptionBits options)
++{
++	OSArray *clients;
++
++	event->setSenderID(getRegistryEntryID());
++	IOLockLock(_clientLock);
++	clients = _clients;
++	clients->retain();
++	IOLockUnlock(_clientLock);
++
++	for (unsigned int i = 0; i < clients->getCount(); i++) {
++		IOHIDEventServiceClient *data = (IOHIDEventServiceClient *)clients->getObject(i);
++		if (data->action) {
++			(*data->action)(data->client, this, data->context, event, options);
++		}
++	}
++	clients->release();
++}
++
++IOHIDEvent *
++IOHIDEventService::copyEvent(IOHIDEventType type __unused, IOHIDEvent *matching __unused, IOOptionBits options __unused)
++{
++	return NULL;
++}
++
++IOHIDEvent *
++IOHIDEventService::copyMatchingEvent(OSDictionary *matching __unused)
++{
++	return NULL;
++}
++
++IOReturn
++IOHIDEventService::setElementValue(UInt32 usagePage __unused, UInt32 usage __unused, UInt32 value __unused)
++{
++	return kIOReturnUnsupported;
++}
++
++IOReturn
++IOHIDEventService::setProperties(OSObject *properties)
++{
++	/* The event system pushes its settings here; nothing to configure. */
++	return OSDynamicCast(OSDictionary, properties) ? kIOReturnSuccess : kIOReturnBadArgument;
++}
++
++UInt32
++IOHIDEventService::getPrimaryUsagePage()
++{
++	return 0;
++}
++
++UInt32
++IOHIDEventService::getPrimaryUsage()
++{
++	return 0;
++}
++
++OSString *
++IOHIDEventService::getTransport()
++{
++	return OSString::withCString("SPU");
++}
++
++OSString *
++IOHIDEventService::getProduct()
++{
++	return OSString::withCString(getName());
++}
++
++UInt32
++IOHIDEventService::getVendorID()
++{
++	return 0x05ac;
++}
++
++UInt32
++IOHIDEventService::getProductID()
++{
++	return 0;
++}
++
++UInt32
++IOHIDEventService::getReportInterval()
++{
++	return 10000;	/* us */
++}
++
++IOReturn
++IOHIDEventService::newUserClient(task_t owningTask, void *securityID, UInt32 type,
++    OSDictionary *properties, IOUserClient **handler)
++{
++	IOUserClient *client;
++
++	if (type != kIOHIDEventServiceUserClientType) {
++		IOLog("BCM2837 HID: %s user client type 0x%x unsupported\n", getName(), (unsigned)type);
++		return super::newUserClient(owningTask, securityID, type, properties, handler);
++	}
++	client = OSTypeAlloc(IOHIDEventServiceUserClient);
++	if (!client) {
++		return kIOReturnNoMemory;
++	}
++	if (!client->initWithTask(owningTask, securityID, type)) {
++		client->release();
++		IOLog("BCM2837 HID: %s user client init refused\n", getName());
++		return kIOReturnBadArgument;
++	}
++	if (!client->attach(this)) {
++		client->release();
++		return kIOReturnUnsupported;
++	}
++	if (!client->start(this)) {
++		client->detach(this);
++		client->release();
++		return kIOReturnUnsupported;
++	}
++	*handler = client;
++	return kIOReturnSuccess;
++}
++
++/*
++ * Buttons. iOS takes the side/volume/home buttons as consumer-control
++ * keyboard events (AppleM68Buttons publishes the same usage pair).
++ */
++class BCM2837HIDButtons : public IOHIDEventService {
++	OSDeclareDefaultStructors(BCM2837HIDButtons);
++public:
++	virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	void key(UInt32 usage, bool down);
++protected:
++	virtual UInt32 getPrimaryUsagePage() APPLE_KEXT_OVERRIDE { return kHIDPage_Consumer; }
++	virtual UInt32 getPrimaryUsage() APPLE_KEXT_OVERRIDE { return kHIDUsage_Csmr_ConsumerControl; }
++	virtual UInt32 getProductID() APPLE_KEXT_OVERRIDE { return 1; }
++private:
++	static void testFired(OSObject *owner, IOTimerEventSource *sender);
++	IOTimerEventSource *fTest;
++	UInt32 fTestSecs;
++	UInt32 fTestCount;
++};
++OSDefineMetaClassAndStructors(BCM2837HIDButtons, IOHIDEventService);
++
++/*
++ * Touch screen: digitizer collection events with finger children,
++ * coordinates normalized to 0..1 like IOHIDEventDriver produces for
++ * absolute digitizers.
++ */
++#define BCM2837_TOUCH_FINGERS 10
++class BCM2837HIDTouch : public IOHIDEventService {
++	OSDeclareDefaultStructors(BCM2837HIDTouch);
++public:
++	virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	void touch(int finger, bool down, int x, int y);
++protected:
++	virtual UInt32 getPrimaryUsagePage() APPLE_KEXT_OVERRIDE { return kHIDPage_Digitizer; }
++	virtual UInt32 getPrimaryUsage() APPLE_KEXT_OVERRIDE { return kHIDUsage_Dig_TouchScreen; }
++	virtual UInt32 getProductID() APPLE_KEXT_OVERRIDE { return 2; }
++private:
++	IOLock *fLock;
++	bool fDown[BCM2837_TOUCH_FINGERS];
++	IOFixed fX[BCM2837_TOUCH_FINGERS];
++	IOFixed fY[BCM2837_TOUCH_FINGERS];
++};
++OSDefineMetaClassAndStructors(BCM2837HIDTouch, IOHIDEventService);
++
++/* The digitizer covers the boot framebuffer (the display AppleCLCD presents). */
++static uint32_t gPanelW = 1125, gPanelH = 2436;
++
++static BCM2837HIDButtons *gSweetButtons;
++static BCM2837HIDTouch *gSweetTouch;
++
++bool
++BCM2837HIDButtons::start(IOService *provider)
++{
++	if (!IOHIDEventService::start(provider)) {
++		return false;
++	}
++	if (PE_parse_boot_argn("sweethidtest", &fTestSecs, sizeof(fTestSecs)) && fTestSecs) {
++		fTest = IOTimerEventSource::timerEventSource(this, &BCM2837HIDButtons::testFired);
++		if (fTest && _hidWorkLoop->addEventSource(fTest) == kIOReturnSuccess) {
++			fTest->setTimeoutMS(fTestSecs * 1000);
++		}
++	}
++	gSweetButtons = this;
++	registerService();
++	IOLog("BCM2837 HID: buttons registered (test every %u s)\n", fTestSecs);
++	return true;
++}
++
++void
++BCM2837HIDButtons::key(UInt32 usage, bool down)
++{
++	IOHIDEvent *event = IOHIDEvent::keyboardEvent(mach_absolute_time(), kHIDPage_Consumer, usage, down);
++
++	if (event) {
++		IOLog("BCM2837 HID: key 0x%x %s (%u clients)\n", (unsigned)usage, down ? "down" : "up",
++		    _clients ? _clients->getCount() : 0);
++		dispatchEvent(event);
++		event->release();
++	}
++}
++
++void
++BCM2837HIDButtons::testFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	BCM2837HIDButtons *self = (BCM2837HIDButtons *)owner;
++
++	/*
++	 * Home (Menu) press, then the release 100 ms later; Setup's "Hello"
++	 * screen waits for it. Even counts press, odd counts release.
++	 */
++	bool press = (self->fTestCount & 1) == 0;
++	self->key(kHIDUsage_Csmr_Menu, press);
++	if (++self->fTestCount < 60) {
++		sender->setTimeoutMS(press ? 100 : self->fTestSecs * 1000);
++	}
++}
++
++bool
++BCM2837HIDTouch::start(IOService *provider)
++{
++	fLock = IOLockAlloc();
++	if (!fLock || !IOHIDEventService::start(provider)) {
++		return false;
++	}
++	PE_Video video;
++	PE_current_console(&video);
++	if (video.v_width && video.v_height) {
++		gPanelW = (uint32_t)video.v_width;
++		gPanelH = (uint32_t)video.v_height;
++	}
++	/* The digitizer covers the main display (backboardd maps it 1:1). */
++	setProperty("DisplayIntegrated", kOSBooleanTrue);
++	setProperty("SurfaceWidth", (unsigned long long)(65 << 16), 32);	/* mm, 16.16 (iPhone X: 375 pt at 458 ppi) */
++	setProperty("SurfaceHeight", (unsigned long long)(135 << 16), 32);
++	gSweetTouch = this;
++	registerService();
++	IOLog("BCM2837 HID: touch registered\n");
++	return true;
++}
++
++void
++BCM2837HIDTouch::touch(int finger, bool down, int x, int y)
++{
++	uint64_t now = mach_absolute_time();
++	IOHIDEvent *collection;
++	bool any = false;
++
++	if (finger < 0 || finger >= BCM2837_TOUCH_FINGERS) {
++		return;
++	}
++	x = x < 0 ? 0 : (x > (int)gPanelW - 1 ? (int)gPanelW - 1 : x);
++	y = y < 0 ? 0 : (y > (int)gPanelH - 1 ? (int)gPanelH - 1 : y);
++
++	IOLockLock(fLock);
++	bool was = fDown[finger];
++	IOFixed nx = (IOFixed)(((int64_t)x << 16) / (int)gPanelW);
++	IOFixed ny = (IOFixed)(((int64_t)y << 16) / (int)gPanelH);
++	bool moved = down && (nx != fX[finger] || ny != fY[finger]);
++	if (was == down && !moved) {
++		IOLockUnlock(fLock);
++		return;
++	}
++
++	collection = IOHIDEvent::digitizerEvent(now, 0, kIOHIDDigitizerTransducerTypeHand, false, 0, 0, 0);
++	if (!collection) {
++		IOLockUnlock(fLock);
++		return;
++	}
++	collection->setIntegerValue(kIOHIDEventFieldDigitizerCollection, TRUE);
++
++	UInt32 cmask = 0;
++	for (int i = 0; i < BCM2837_TOUCH_FINGERS; i++) {
++		bool d = (i == finger) ? down : fDown[i];
++		if (i != finger && !d) {
++			continue;
++		}
++		IOFixed fx = (i == finger && down) ? nx : fX[i];
++		IOFixed fy = (i == finger && down) ? ny : fY[i];
++		IOHIDEvent *child = IOHIDEvent::digitizerEvent(now, (UInt32)i + 2, kIOHIDDigitizerTransducerTypeFinger,
++		    d, d ? 1 : 0, fx, fy);
++		if (!child) {
++			continue;
++		}
++		UInt32 mask = 0;
++		if (i == finger) {
++			if (was != down) {
++				mask |= kIOHIDDigitizerEventTouch | kIOHIDDigitizerEventRange;
++			}
++			if (moved) {
++				mask |= kIOHIDDigitizerEventPosition;
++			}
++			if (!was && down) {
++				mask |= kIOHIDDigitizerEventIdentity;
++			}
++		}
++		child->setIntegerValue(kIOHIDEventFieldDigitizerIndex, i);
++		child->setIntegerValue(kIOHIDEventFieldDigitizerIdentity, i + 2);
++		child->setIntegerValue(kIOHIDEventFieldDigitizerTouch, d);
++		child->setIntegerValue(kIOHIDEventFieldDigitizerEventMask, mask);
++		collection->appendChild(child);
++		child->release();
++		cmask |= mask;
++		any |= d;
++	}
++	fDown[finger] = down;
++	if (down) {
++		fX[finger] = nx;
++		fY[finger] = ny;
++	}
++	collection->setFixedValue(kIOHIDEventFieldDigitizerX, nx);
++	collection->setFixedValue(kIOHIDEventFieldDigitizerY, ny);
++	collection->setIntegerValue(kIOHIDEventFieldDigitizerRange, any);
++	collection->setIntegerValue(kIOHIDEventFieldDigitizerTouch, any);
++	collection->setIntegerValue(kIOHIDEventFieldDigitizerEventMask, cmask);
++	collection->setIntegerValue(kIOHIDEventFieldDigitizerButtonMask, any ? 1 : 0);
++	IOLockUnlock(fLock);
++
++	if (was != down) {
++		IOLog("BCM2837 HID: touch %d %s at %d,%d\n", finger, down ? "down" : "up", x, y);
++	}
++	dispatchEvent(collection);
++	collection->release();
++}
++
++/* key: 0 power (side button), 1 volume up, 2 volume down, 3 home */
++extern "C" void
++bcm2837_hid_key(int key, int down)
++{
++	static const UInt32 usages[] = {
++		kHIDUsage_Csmr_Power, kHIDUsage_Csmr_VolumeIncrement,
++		kHIDUsage_Csmr_VolumeDecrement, kHIDUsage_Csmr_Menu,
++	};
++
++	if (gSweetButtons && key >= 0 && key < (int)(sizeof(usages) / sizeof(usages[0]))) {
++		gSweetButtons->key(usages[key], down != 0);
++	}
++}
++
++extern "C" void
++bcm2837_hid_touch(int finger, int down, int x, int y)
++{
++	if (gSweetTouch) {
++		gSweetTouch->touch(finger, down != 0, x, y);
++	}
++}
++
++/*
++ * Input source for the QEMU raspi3b, which has no touch screen: text commands on the PL011 serial
++ * port (uart0, QEMU serial0; tools/qemu-touch.py talks to it). One command per line:
++ *   t FINGER d|m|u X Y     touch down / move / up at panel pixel X,Y
++ *   k KEY d|u              key down/up: 0 power, 1 volume up, 2 volume down, 3 home
++ * Polled every 2 ms (the kernel has no interrupt controller driver yet).
++ */
++extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++
++#define PL011_PHYS      0x3f201000ULL
++#define PL011_DR        0x00
++#define PL011_FR        0x18
++#define PL011_LCRH      0x2c
++#define PL011_CR        0x30
++#define PL011_FR_RXFE   (1u << 4)
++
++class BCM2837HIDUart : public IOService {
++	OSDeclareDefaultStructors(BCM2837HIDUart);
++public:
++	virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++private:
++	static void pollFired(OSObject *owner, IOTimerEventSource *sender);
++	void command(char *line);
++	IOWorkLoop         *fWorkLoop;
++	IOTimerEventSource *fPoll;
++	vm_offset_t         fRegs;
++	char                fLine[96];
++	unsigned            fLen;
++	unsigned            fLogged;
++};
++OSDefineMetaClassAndStructors(BCM2837HIDUart, IOService);
++
++bool
++BCM2837HIDUart::start(IOService *provider)
++{
++	if (!IOService::start(provider)) {
++		return false;
++	}
++	fRegs = ml_io_map((vm_offset_t)PL011_PHYS, 0x1000);
++	if (!fRegs) {
++		return false;
++	}
++	volatile uint32_t *r = (volatile uint32_t *)fRegs;
++	r[PL011_LCRH / 4] = 0x70;       /* 8N1, FIFOs on */
++	r[PL011_CR / 4] = 0x0301;       /* UART, TX, RX enabled */
++	fWorkLoop = IOWorkLoop::workLoop();
++	fPoll = IOTimerEventSource::timerEventSource(this, &BCM2837HIDUart::pollFired);
++	if (!fWorkLoop || !fPoll || fWorkLoop->addEventSource(fPoll) != kIOReturnSuccess) {
++		return false;
++	}
++	fPoll->setTimeoutMS(2);
++	registerService();
++	IOLog("BCM2837 HID: input commands on the PL011 UART\n");
++	return true;
++}
++
++void
++BCM2837HIDUart::command(char *line)
++{
++	char *tok[6];
++	int n = 0;
++
++	for (char *p = line; *p && n < 6;) {
++		while (*p == ' ') {
++			*p++ = 0;
++		}
++		if (*p) {
++			tok[n++] = p;
++			while (*p && *p != ' ') {
++				p++;
++			}
++		}
++	}
++	if (fLogged < 40) {
++		fLogged++;
++		IOLog("BCM2837 HID: command '%s'%s\n", n ? tok[0] : "", n > 1 ? " ..." : "");
++	}
++	if (n >= 5 && tok[0][0] == 't') {
++		int finger = (int)strtoul(tok[1], NULL, 10);
++		char state = tok[2][0];
++		int x = (int)strtoul(tok[3], NULL, 10), y = (int)strtoul(tok[4], NULL, 10);
++		bcm2837_hid_touch(finger, state != 'u', x, y);
++	} else if (n >= 3 && tok[0][0] == 'k') {
++		bcm2837_hid_key((int)strtoul(tok[1], NULL, 10), tok[2][0] == 'd');
++	}
++}
++
++void
++BCM2837HIDUart::pollFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	BCM2837HIDUart *self = (BCM2837HIDUart *)owner;
++	volatile uint32_t *r = (volatile uint32_t *)self->fRegs;
++
++	for (int i = 0; i < 256 && !(r[PL011_FR / 4] & PL011_FR_RXFE); i++) {
++		char c = (char)(r[PL011_DR / 4] & 0xff);
++		if (c == '\n' || c == '\r') {
++			if (self->fLen) {
++				self->fLine[self->fLen] = 0;
++				self->command(self->fLine);
++				self->fLen = 0;
++			}
++		} else if (self->fLen < sizeof(self->fLine) - 1) {
++			self->fLine[self->fLen++] = c;
++		}
++	}
++	sender->setTimeoutMS(2);
++}
+diff --git a/iokit/Kernel/arm/hid/IOHIDEventService.h b/iokit/Kernel/arm/hid/IOHIDEventService.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/hid/IOHIDEventService.h
+@@ -0,0 +1,75 @@
++/*
++ * BCM2837: minimal IOHIDEventService.
++ *
++ * Apple's IOHIDFamily kext is not part of xnu. The iOS 16.7 userland
++ * (IOKit.framework's HID event system, IOHIDFamily-1915.140.3) talks to
++ * IOHIDEventService objects through IOHIDEventServiceUserClient, which is
++ * compiled here unchanged from IOHIDFamily-1915.140.3 together with
++ * IOHIDEventServiceQueue and IOHIDEvent (the shared-memory event queue and
++ * the event serialization). This class provides only the part of the real
++ * IOHIDEventService interface that the user client uses, plus dispatchEvent
++ * for drivers. It does not parse HID report descriptors: subclasses build
++ * IOHIDEvents themselves.
++ */
++#ifndef _IOKIT_HID_IOHIDEVENTSERVICE_H
++#define _IOKIT_HID_IOHIDEVENTSERVICE_H
++
++#include <IOKit/IOService.h>
++#include <IOKit/IOWorkLoop.h>
++#include <IOKit/IOCommandGate.h>
++#include "IOHIDEventTypes.h"
++
++class IOHIDEvent;
++
++/* dispatchEvent options (IOHIDFamily IOHIDEventService.h) */
++enum {
++	kHIDDispatchOptionDeliveryNotificationForce         = (1 << 12),
++	kHIDDispatchOptionDeliveryNotificationSuppress      = (1 << 13)
++};
++
++class IOHIDEventService : public IOService
++{
++	OSDeclareDefaultStructors(IOHIDEventService);
++
++public:
++	typedef void (*Action)(OSObject *target, OSObject *sender, void *context, OSObject *event, IOOptionBits options);
++
++	virtual bool            start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	virtual void            free(void) APPLE_KEXT_OVERRIDE;
++
++	virtual bool            open(IOService *client, IOOptionBits options, void *context, Action action);
++	virtual void            close(IOService *forClient, IOOptionBits options = 0) APPLE_KEXT_OVERRIDE;
++
++	virtual IOHIDEvent *    copyEvent(IOHIDEventType type, IOHIDEvent *matching = 0, IOOptionBits options = 0);
++	virtual IOHIDEvent *    copyMatchingEvent(OSDictionary *matching);
++	virtual IOReturn        setElementValue(UInt32 usagePage, UInt32 usage, UInt32 value);
++	virtual IOReturn        setProperties(OSObject *properties) APPLE_KEXT_OVERRIDE;
++
++	virtual UInt32          getPrimaryUsagePage();
++	virtual UInt32          getPrimaryUsage();
++
++	virtual IOReturn        newUserClient(task_t owningTask, void *securityID, UInt32 type,
++	    OSDictionary *properties, IOUserClient **handler) APPLE_KEXT_OVERRIDE;
++
++protected:
++	virtual bool            handleOpen(IOService *client, IOOptionBits options, void *argument) APPLE_KEXT_OVERRIDE;
++	virtual void            handleClose(IOService *client, IOOptionBits options) APPLE_KEXT_OVERRIDE;
++	virtual bool            handleIsOpen(const IOService *client) const APPLE_KEXT_OVERRIDE;
++
++	bool                    handleIsOpenLocked(const IOService *client) const;
++	virtual void            dispatchEvent(IOHIDEvent *event, IOOptionBits options = 0);
++
++	/* Published as HID properties by start(). */
++	virtual OSString *      getTransport();
++	virtual OSString *      getProduct();
++	virtual UInt32          getVendorID();
++	virtual UInt32          getProductID();
++	virtual UInt32          getReportInterval();
++
++	IOWorkLoop *            _hidWorkLoop;
++	IOCommandGate *         _hidGate;
++	IOLock *                _clientLock;
++	OSArray *               _clients;	/* IOHIDEventServiceClient per open client */
++};
++
++#endif /* _IOKIT_HID_IOHIDEVENTSERVICE_H */
+diff --git a/iokit/Kernel/arm/hid/IOGraphicsTypes.h b/iokit/Kernel/arm/hid/IOGraphicsTypes.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/hid/IOGraphicsTypes.h
+@@ -0,0 +1,22 @@
++/*
++ * BCM2837: the two IOGraphics types the HID headers use (IOGraphicsFamily
++ * is not part of xnu). Layouts as in IOKit/graphics/IOGraphicsTypes.h.
++ */
++#ifndef _IOKIT_IOGRAPHICSTYPES_H
++#define _IOKIT_IOGRAPHICSTYPES_H
++
++#include <IOKit/IOTypes.h>
++
++typedef struct IOGPoint {
++	SInt16 x;
++	SInt16 y;
++} IOGPoint;
++
++typedef struct IOGBounds {
++	SInt16 minx;
++	SInt16 maxx;
++	SInt16 miny;
++	SInt16 maxy;
++} IOGBounds;
++
++#endif /* _IOKIT_IOGRAPHICSTYPES_H */
