@@ -1,0 +1,15 @@
+--- a/osfmk/kern/host.c
++++ b/osfmk/kern/host.c
+@@ -1386,7 +1386,11 @@
+ kern_return_t
+ host_set_multiuser_config_flags(host_priv_t host_priv, uint32_t multiuser_config)
+ {
+-#if !defined(XNU_TARGET_OS_OSX)
++	/*
++	 * BCM2837: the macOS config runs the iOS userland, whose usermanagerd sets the multiuser
++	 * state in the commpage; without it launchd never answers get_foreground_uid and lsd blocks.
++	 */
++#if !defined(XNU_TARGET_OS_OSX) || defined(ARM64_BOARD_CONFIG_BCM2837)
+ 	if (host_priv == HOST_PRIV_NULL) {
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
