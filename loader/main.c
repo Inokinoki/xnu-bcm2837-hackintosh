@@ -27,6 +27,8 @@
 #define MBOX_FULL	0x80000000u
 #define MBOX_EMPTY	0x40000000u
 
+#define ST_CLO		(MMIO_BASE + 0x3004)	/* BCM2835 system timer, 1 MHz */
+
 #define RNG_BASE	(MMIO_BASE + 0x104000)
 #define RNG_CTRL	(RNG_BASE + 0x00)
 #define RNG_STATUS	(RNG_BASE + 0x04)
@@ -152,6 +154,47 @@ static void fill_seed(uint8_t *dst, uint32_t n)
 }
 
 /* Find the copied ADT's "random-seed" property and fill its value. */
+
+/*
+ * The generic counter runs at 19.2 MHz on a Pi 3 but at 62.5 MHz in QEMU, whatever CNTFRQ says.
+ * Measure it against the 1 MHz system timer so the ADT carries the real rate: with a wrong
+ * timebase every kernel and userland timeout is off by that factor.
+ */
+static uint32_t measure_timebase(void)
+{
+	uint64_t c0, c1;
+	uint32_t t0, t1;
+	__asm__ volatile("isb; mrs %0, cntpct_el0" : "=r"(c0));
+	t0 = mmio_r(ST_CLO);
+	do {
+		t1 = mmio_r(ST_CLO);
+	} while (t1 - t0 < 5000);		/* 5 ms */
+	__asm__ volatile("isb; mrs %0, cntpct_el0" : "=r"(c1));
+	uint64_t hz = (c1 - c0) * 1000000ull / (t1 - t0);
+	if (hz > 17000000 && hz < 21000000)
+		return 19200000;
+	if (hz > 56000000 && hz < 69000000)
+		return 62500000;
+	return (uint32_t)((hz + 500) / 1000 * 1000);
+}
+
+static void patch_u32_prop(uintptr_t adt, uint64_t size, const char *name, uint32_t value)
+{
+	const uint8_t *b = (const uint8_t *)adt;
+	int n = 0;
+	while (name[n]) n++;
+	for (uint64_t i = 0; i + 32 + 4 + 4 <= size; i += 4) {
+		int hit = 1;
+		for (int k = 0; k < n; k++)
+			if (b[i + k] != (uint8_t)name[k]) { hit = 0; break; }
+		if (hit && b[i + n] == 0 && (*(const uint32_t *)(adt + i + 32) & 0x7fffffff) == 4) {
+			*(volatile uint32_t *)(adt + i + 36) = value;
+			return;
+		}
+	}
+	uart_puts("[loader] no timebase-frequency property in the ADT\n");
+}
+
 static void seed_adt(uintptr_t adt, uint64_t size)
 {
 	static const char name[] = "random-seed";
@@ -293,6 +336,9 @@ void loader_main(uint64_t dtb)
 	uintptr_t adt_pa = p->kernel_end + pa_of_va;
 	copy64(adt_pa, (uintptr_t)p + p->adt_off, p->adt_size);
 	seed_adt(adt_pa, p->adt_size);
+	uint32_t tb = measure_timebase();
+	uart_line("timebase", tb);
+	patch_u32_prop(adt_pa, p->adt_size, "timebase-frequency", tb);
 	uintptr_t ba_pa = (adt_pa + p->adt_size + PAGE_16K - 1) & ~(PAGE_16K - 1);
 	uintptr_t top = ba_pa + PAGE_16K;
 
