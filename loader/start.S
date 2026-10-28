@@ -1,23 +1,27 @@
 /*
  * BCM2837 loader entry. QEMU's raspi3b (and the Pi firmware) start the image
  * at 0x80000 with x0 = DTB; the kernel wants EL1 with the MMU and caches off.
- * Park every core but 0, drop EL2 -> EL1 if needed, then run loader_main().
+ * Every core drops to EL1 here (QEMU starts all four at this entry, at EL3; on the real
+ * Pi the firmware parks cores 1-3 in a spin table and loader_main() sends them here).
+ * Core 0 runs loader_main(); cores 1-3 wait in .Lsecondary at EL1 with the MMU off for
+ * xnu to write the physical address of its reset handler into secondary_release[core]
+ * (xnu's BCM2837CPU::startCPU), then jump to it.
  */
 	.section .text.start, "ax"
 	.globl _start
 _start:
-	mrs	x1, mpidr_el1
-	and	x1, x1, #3
-	cbnz	x1, .Lpark
-
-	/* Pi 3 generic timer: 19.2 MHz (loader_main measures the real rate and patches the ADT) */
-	ldr	x1, =19200000
-	msr	cntfrq_el0, x1
-
 	mrs	x1, CurrentEL
 	lsr	x1, x1, #2
 	cmp	x1, #3
 	b.ne	.Lel2
+
+	/* EL3 only (QEMU): the generic timer frequency register and the A53 SMP bit are EL3 state.
+	 * The Pi firmware does both before it hands over at EL2. */
+	ldr	x1, =19200000
+	msr	cntfrq_el0, x1
+	mrs	x1, S3_1_C15_C2_1		/* CPUECTLR_EL1 */
+	orr	x1, x1, #(1 << 6)		/* SMPEN: the core takes part in coherency */
+	msr	S3_1_C15_C2_1, x1
 
 	/* EL3 -> EL2: non-secure, AArch64 lower levels, HVC enabled */
 	mov	x1, #((1 << 10) | (1 << 8) | (1 << 0))	/* SCR_EL3: RW, HCE, NS */
@@ -55,6 +59,9 @@ _start:
 	ldr	x1, =0x30d00800
 	msr	sctlr_el1, x1
 	isb
+	mrs	x1, mpidr_el1
+	and	x1, x1, #3
+	cbnz	x1, .Lsecondary
 	ldr	x1, =__stack_top
 	mov	sp, x1
 
@@ -67,6 +74,23 @@ _start:
 	b	1b
 2:
 	bl	loader_main			/* x0 = DTB, unused for now */
+
+/*
+ * Cores 1-3: no stack, MMU and caches off, EL1. Wait for xnu to publish the physical address of
+ * its reset handler in secondary_release[core] (device-ordered reads see the RAM value; xnu
+ * writes it through an uncached mapping), then jump there like a firmware release would.
+ */
+.Lsecondary:
+	ldr	x2, =secondary_release
+	add	x2, x2, x1, lsl #3
+1:	ldr	x3, [x2]
+	cbnz	x3, 2f
+	wfe
+	b	1b
+2:	dsb	sy
+	isb
+	mov	x0, xzr
+	br	x3
 
 .Lpark:
 	wfe

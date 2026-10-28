@@ -63,7 +63,7 @@ if [ -n "${SCREENDUMP:-}" ]; then
     SDPID=$!
     MONITOR="-monitor unix:$OUT/mon.sock,server,nowait"
 fi
-timeout "$SECS" "$QEMU" ${MONITOR:-} ${LOADVM:+-loadvm "$LOADVM"} -M raspi3b -kernel "$OUT/loader.elf" \
+timeout "$SECS" "$QEMU" ${MONITOR:-} ${LOADVM:+-loadvm "$LOADVM"} ${QEMU_ARGS:-} -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
     ${SDIMG:+-drive file="$SDIMG",if=sd,format=${SDFORMAT:-raw}${SDSNAPSHOT:+,snapshot=on}} \
     -display none -serial "${HIDSERIAL:-null}" -serial file:"$OUT/uart1.log" \

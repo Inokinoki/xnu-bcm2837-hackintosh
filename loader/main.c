@@ -332,6 +332,47 @@ static int fb_init(unsigned w, unsigned h, struct fbinfo *fb)
 	return fb->base != 0 && fb->pitch >= w * 4;
 }
 
+/*
+ * Release words for the secondary cores, one per core (index 0 unused): xnu's
+ * BCM2837CPU::startCPU writes the physical address of its reset handler to
+ * secondary_release[core] and sends an event; the core parked in start.S jumps there.
+ * The loader image never moves and xnu does not touch memory below the kernel, so the
+ * physical address is the link address; the ADT carries it as cpu-release-addr.
+ */
+volatile uint64_t secondary_release[4] __attribute__((aligned(64), section(".data"))) = { 0, 0, 0, 0 };
+
+/* Write the cpu-release-addr properties (8 bytes) of the cpu nodes, in node order (cpu1..cpu3). */
+static void patch_release_addrs(uintptr_t adt, uint64_t size)
+{
+	static const char name[] = "cpu-release-addr";
+	const uint8_t *b = (const uint8_t *)adt;
+	unsigned core = 1;
+	for (uint64_t i = 0; i + 32 + 4 + 8 <= size && core < 4; i += 4) {
+		int hit = 1;
+		for (int k = 0; name[k]; k++)
+			if (b[i + k] != (uint8_t)name[k]) { hit = 0; break; }
+		if (hit && b[i + 16] == 0 && (*(const uint32_t *)(adt + i + 32) & 0x7fffffff) == 8) {
+			*(volatile uint64_t *)(adt + i + 36) = (uint64_t)(uintptr_t)&secondary_release[core];
+			core++;
+		}
+	}
+	uart_line("secondary cpus described in the ADT", core - 1);
+}
+
+/*
+ * The Pi firmware parks cores 1-3 in a spin table (0xe0, 0xe8, 0xf0 hold the address to jump to):
+ * point them at this loader's entry, which parks them again, at EL1, in start.S. QEMU's cores
+ * are already running here and never read these words.
+ */
+static void kick_spin_table(void)
+{
+	extern char _start[];
+	for (int core = 1; core < 4; core++)
+		/* inline asm: a plain C store to such a small address is undefined behaviour to the compiler */
+		__asm__ volatile("str %0, [%1]" :: "r"((uint64_t)(uintptr_t)_start), "r"((uint64_t)(0xd8 + 8 * core)) : "memory");
+	__asm__ volatile("dsb sy; sev" ::: "memory");
+}
+
 typedef void (*kernel_entry_t)(uint64_t boot_args_pa);
 
 void loader_main(uint64_t dtb)
@@ -376,6 +417,8 @@ void loader_main(uint64_t dtb)
 	uint32_t tb = measure_timebase();
 	uart_line("timebase", tb);
 	patch_u32_prop(adt_pa, p->adt_size, "timebase-frequency", tb);
+	patch_release_addrs(adt_pa, p->adt_size);
+	kick_spin_table();
 	uintptr_t ba_pa = (adt_pa + p->adt_size + PAGE_16K - 1) & ~(PAGE_16K - 1);
 	uintptr_t top = ba_pa + PAGE_16K;
 
