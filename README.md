@@ -114,3 +114,9 @@ events reach the kernel and the user client, but **no visible reaction on the lo
 selector (72) is never called by backboardd, which is the main suspect (CoreAnimation's display link needs it).
 QEMU snapshots (`savevm`, `LOADVM=`) work on raspi3b and help repeat gesture tests.
 
+Screenshot gotcha: QEMU's `screendump` pads PPM rows to 4 bytes (3376 instead of 3375 for a 1125 pixel wide
+frame). Read as packed rows that skews the picture by a third of a pixel per row, which looks like a
+misaligned framebuffer (text drifting right, channels cycling). `tools/qemu-screendump.py` now writes packed
+PPMs. A calibration pattern from the loader (`fbtest=1` in the boot-args) or the kernel (`sweetfb_pattern=1`)
+shows the framebuffer itself is exact: address, pitch, channel order, centre, all four borders.
+

@@ -272,6 +272,43 @@ struct fbinfo {
 	unsigned w, h;
 };
 
+/* Boot-arg fbtest=1: draw a calibration pattern from the loader and stop (display path check). */
+static int has_arg(const char *cl, const char *arg)
+{
+	for (const char *start = cl; *cl; cl++) {
+		int n = 0;
+		while (arg[n] && cl[n] == arg[n]) n++;
+		if (!arg[n] && (cl == start || cl[-1] == ' '))
+			return 1;
+	}
+	return 0;
+}
+
+static void fb_pattern(const struct fbinfo *fb)
+{
+	for (unsigned y = 0; y < fb->h; y++) {
+		volatile uint32_t *row = (volatile uint32_t *)(uintptr_t)(fb->base + (uint64_t)y * fb->pitch);
+		for (unsigned x = 0; x < fb->w; x++) {
+			uint32_t c = 0xff202020;
+			if ((x % 125) == 0 || (y % 125) == 0)
+				c = 0xff506090;
+			if (x == fb->w / 2 || y == fb->h / 2)
+				c = 0xffff00ff;
+			if (x < 4 || y < 4 || x >= fb->w - 4 || y >= fb->h - 4)
+				c = 0xffffffff;
+			else if (x < 104 && y < 104)
+				c = 0xffff0000;
+			else if (x >= fb->w - 104 && y < 104)
+				c = 0xff00ff00;
+			else if (x < 104 && y >= fb->h - 104)
+				c = 0xff0000ff;
+			else if (x >= fb->w - 104 && y >= fb->h - 104)
+				c = 0xffffff00;
+			row[x] = c;
+		}
+	}
+}
+
 static int fb_init(unsigned w, unsigned h, struct fbinfo *fb)
 {
 	unsigned i = 0;
@@ -357,6 +394,12 @@ void loader_main(uint64_t dtb)
 		if (find_fb_size(p->cmdline, &fw, &fh) && fb_init(fw, fh, &fb)) {
 			/* QEMU places the payload where the VideoCore RAM starts: start from a black screen */
 			zero64(fb.base, fb.pitch * fb.h);
+			if (has_arg(p->cmdline, "fbtest=1")) {
+				fb_pattern(&fb);
+				uart_line("fbtest pattern drawn, pitch", fb.pitch);
+				for (;;)
+					__asm__ volatile("wfe");
+			}
 			uart_line("framebuffer", fb.base);
 			uart_line("fb pitch", fb.pitch);
 			ba->Video.v_baseAddr = fb.base;
