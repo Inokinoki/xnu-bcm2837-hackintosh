@@ -23,7 +23,8 @@ $CC -nostdlib -static -T "$HERE/loader/link.ld" -o "$OUT/loader.elf" "$OUT/start
 
 # 2. payload: the kernel's segments + ADT + command line, placed at PAYLOAD_PA
 # RAMDISK=image makes the payload carry a RAM disk root (boot-arg rd=md0);
-# SDSNAPSHOT=1 keeps the image unmodified (QEMU snapshot=on).
+# SDSNAPSHOT=1 keeps the image unmodified (QEMU snapshot=on). SDFORMAT=qcow2 with a qcow2 overlay
+# (qemu-img create -f qcow2 -b root.img -F raw overlay.qcow2) keeps the guest's writes between runs.
 # SDIMG=image attaches it as the SD card (a power-of-two size) and roots on it (rd=sdroot0).
 # CMDLINE overrides the default boot-args.
 set -- "$KERNEL" "$OUT/payload.bin"
@@ -57,7 +58,7 @@ if [ -n "${SCREENDUMP:-}" ]; then
 fi
 timeout "$SECS" "$QEMU" ${MONITOR:-} -M raspi3b -kernel "$OUT/loader.elf" \
     -device loader,file="$OUT/payload.bin",addr=0x3c000000,force-raw=on \
-    ${SDIMG:+-drive file="$SDIMG",if=sd,format=raw${SDSNAPSHOT:+,snapshot=on}} \
+    ${SDIMG:+-drive file="$SDIMG",if=sd,format=${SDFORMAT:-raw}${SDSNAPSHOT:+,snapshot=on}} \
     -display none -serial null -serial file:"$OUT/uart1.log" \
     -D "$OUT/qemu.log" -d ${QEMU_DEBUG:-guest_errors} -no-reboot
 rc=$?
