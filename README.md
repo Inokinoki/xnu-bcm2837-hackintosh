@@ -120,3 +120,11 @@ misaligned framebuffer (text drifting right, channels cycling). `tools/qemu-scre
 PPMs. A calibration pattern from the loader (`fbtest=1` in the boot-args) or the kernel (`sweetfb_pattern=1`)
 shows the framebuffer itself is exact: address, pitch, channel order, centre, all four borders.
 
+
+## Multi-core
+
+`cpus=N` (1-4) brings up N Cortex-A53 cores. The loader parks cores 1-3 at EL1 in a spin table
+(`cpu-release-addr` in the ADT); `BCM2837CPU::startCPU` writes the reset-vector address there and
+sends an event. IPIs use the BCM2836 local mailbox 0 (IRQ); timers stay FIQ; peripheral interrupts
+stay on core 0 (the Pi 3 has no GIC). Checked on QEMU raspi3b with the tiny init at `cpus=2` and
+`cpus=4`; the iOS root has not been run with more than one core yet.
