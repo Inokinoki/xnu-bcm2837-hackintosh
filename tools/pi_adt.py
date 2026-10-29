@@ -130,6 +130,16 @@ def build(dram_base, dram_size, cmdline='', ramdisk=None, display=None, ios_dt=N
     cpu0.prop('state', 'running')
     cpu0.prop('reg', struct.pack('<I', 0))
     cpu0.prop('timebase-frequency', struct.pack('<I', TIMEBASE_HZ))
+    # Cores 1-3 sit in the loader's spin table; the loader writes each cpu-release-addr.
+    for n in (1, 2, 3):
+        c = cpus.child(f'cpu{n}')
+        c.prop('name', f'cpu{n}')
+        c.prop('device_type', 'cpu')
+        c.prop('compatible', 'arm,cortex-a53')
+        c.prop('state', 'stopped')
+        c.prop('reg', struct.pack('<I', n))
+        c.prop('timebase-frequency', struct.pack('<I', TIMEBASE_HZ))
+        c.prop('cpu-release-addr', struct.pack('<Q', 0))
 
     if ios_dt:
         import adt

@@ -26,12 +26,16 @@ new file mode 100644
 index 0000000..60b092e
 --- /dev/null
 +++ b/iokit/Kernel/arm/BCM2837CPU.cpp
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,234 @@
 +/*
-+ * Single-CPU bring-up for the Raspberry Pi 3 (BCM2837) using XNU's legacy
-+ * IOCPU interface. The architected timer enters through pe_fiq/sleh_irq.
-+ * Secondary CPUs, IPIs (the BCM2836 per-core mailboxes) and suspend need
-+ * separate platform work, so this driver registers only the boot CPU.
++ * SMP for the Raspberry Pi 3 (BCM2837) using XNU's legacy IOCPU interface.
++ *
++ * The Pi 3 has no GIC. Per-core state lives in the BCM2836 local controller at 0x40000000:
++ * the architected timers come in as FIQ (set up in start.s), IPIs are the per-core mailbox 0
++ * (an IRQ), and peripheral interrupts (the legacy ARMCTRL block) are routed to core 0 only.
++ *
++ * Secondary cores are parked by the loader in a spin table (cpu-release-addr in the device
++ * tree); startCPU writes the physical address of the reset vector there and sends an event.
 + */
 +#include <pexpert/arm64/board_config.h>
 +
@@ -46,9 +50,27 @@ index 0000000..60b092e
 +#include <kern/processor.h>
 +#include <mach/mach_time.h>
 +
++extern "C" {
++extern char LowResetVectorBase[];
++extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++}
++
++#define LOCAL_BASE              0x40000000UL
++#define LOCAL_MBOX_IRQCTL(n)    (0x50 + 4 * (n))        /* bit 0: mailbox 0 raises IRQ */
++#define LOCAL_IRQ_SOURCE(n)     (0x60 + 4 * (n))        /* bit 4: mailbox 0 */
++#define LOCAL_MBOX_SET(n)       (0x80 + 16 * (n))       /* mailbox 0 of core n */
++#define LOCAL_MBOX_CLR(n)       (0xC0 + 16 * (n))
++#define LOCAL_SRC_MBOX0         (1U << 4)
++
++static volatile uint32_t *bcm2837_local;
++static uint32_t bcm2837_cpus_started;
++
 +class BCM2837CPU : public IOCPU {
 +	OSDeclareDefaultStructors(BCM2837CPU);
 +	const OSSymbol *cpuName = NULL;
++	volatile uint64_t *releaseWord = NULL;
++
++	static void irqHandler(void *target, void *refCon, IOService *nub, int source);
 +
 +public:
 +	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
@@ -63,21 +85,48 @@ index 0000000..60b092e
 +
 +OSDefineMetaClassAndStructors(BCM2837CPU, IOCPU);
 +
++static inline uint32_t
++local_read(uint32_t off)
++{
++	return bcm2837_local[off / 4];
++}
++
++static inline void
++local_write(uint32_t off, uint32_t val)
++{
++	bcm2837_local[off / 4] = val;
++}
++
 +bool
 +BCM2837CPU::start(IOService *provider)
 +{
 +	const ml_topology_info_t *topology = ml_get_topology_info();
-+	const ml_topology_cpu_t *cpu = topology->boot_cpu;
 +	OSNumber *logical = OSDynamicCast(OSNumber, provider->getProperty("logical-cpu-id"));
 +	OSData *reg = OSDynamicCast(OSData, provider->getProperty("reg"));
 +
 +	if (logical == NULL || reg == NULL || reg->getLength() != sizeof(uint32_t) ||
-+	    logical->unsigned32BitValue() != cpu->cpu_id ||
-+	    *(const uint32_t *)reg->getBytesNoCopy() != cpu->phys_id) {
++	    logical->unsigned32BitValue() >= topology->num_cpus) {
 +		return false;
 +	}
-+	if (topology->num_cpus != 1) {
-+		panic("BCM2837 CPU: only single-CPU bring-up is supported");
++	const ml_topology_cpu_t *cpu = &topology->cpus[logical->unsigned32BitValue()];
++	bool boot = (cpu == topology->boot_cpu);
++	if (*(const uint32_t *)reg->getBytesNoCopy() != cpu->phys_id || cpu->phys_id > 3) {
++		return false;
++	}
++	if (!boot) {
++		OSData *rel = OSDynamicCast(OSData, provider->getProperty("cpu-release-addr"));
++		if (rel == NULL || rel->getLength() != sizeof(uint64_t)) {
++			panic("BCM2837 CPU: cpu %u has no cpu-release-addr", cpu->cpu_id);
++		}
++		uint64_t pa = *(const uint64_t *)rel->getBytesNoCopy();
++		if (pa == 0) {
++			panic("BCM2837 CPU: cpu %u cpu-release-addr is empty (loader did not patch it)", cpu->cpu_id);
++		}
++		vm_offset_t page = ml_io_map((vm_offset_t)(pa & ~0xfffULL), 0x1000);
++		releaseWord = (volatile uint64_t *)(page + (pa & 0xfff));
++	}
++	if (bcm2837_local == NULL) {
++		bcm2837_local = (volatile uint32_t *)ml_io_map(LOCAL_BASE, 0x1000);
 +	}
 +	if (!IOCPU::start(provider)) {
 +		return false;
@@ -106,20 +155,27 @@ index 0000000..60b092e
 +	if (pmi_handler != NULL) {
 +		panic("BCM2837 CPU: PMI routing is not implemented");
 +	}
++	if (boot) {
++		setCPUState(kIOCPUStateRunning);
++		ml_set_max_cpus(topology->max_cpu_id + 1);
++	} else {
++		setCPUState(kIOCPUStateStopped);
++	}
 +
-+	/* Re-enter the boot CPU through cpu_machine_init -> PE_cpu_machine_init. */
++	/* The boot CPU re-enters through cpu_machine_init -> PE_cpu_machine_init; a secondary through start_cpu. */
 +	result = processor_start(machProcessor);
 +	if (result != KERN_SUCCESS || getCPUState() != kIOCPUStateRunning) {
-+		panic("BCM2837 CPU: processor_start failed: %d", result);
++		panic("BCM2837 CPU: processor_start(cpu %u) failed: %d", cpu->cpu_id, result);
 +	}
-+	ml_cpu_init_completed();
-+	cpusRunning();
 +	registerService();
-+	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
++	IOLog("BCM2837 CPU: cpu %u (mpidr %u) is running\n", cpu->cpu_id, cpu->phys_id);
 +
-+	ml_set_max_cpus(topology->max_cpu_id + 1);
-+	IOLog("BCM2837 CPU: boot CPU %u registered, initialization complete\n",
-+	    getCPUNumber());
++	if (os_atomic_inc(&bcm2837_cpus_started, relaxed) == topology->num_cpus) {
++		ml_cpu_init_completed();
++		cpusRunning();
++		IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
++		IOLog("BCM2837 CPU: %u CPUs initialized\n", topology->num_cpus);
++	}
 +	return true;
 +}
 +
@@ -131,28 +187,60 @@ index 0000000..60b092e
 +}
 +
 +void
++BCM2837CPU::irqHandler(void *target __unused, void *refCon __unused, IOService *nub __unused, int source __unused)
++{
++	uint32_t core = ml_get_topology_info()->cpus[cpu_number()].phys_id;
++	uint32_t src = local_read(LOCAL_IRQ_SOURCE(core));
++
++	if (src & LOCAL_SRC_MBOX0) {
++		/* Acknowledge by writing the bits back to the clear register, then run the IPI handler. */
++		local_write(LOCAL_MBOX_CLR(core), local_read(LOCAL_MBOX_CLR(core)));
++		__builtin_arm_dsb(DSB_SY);
++		BCM2837CPU *self = (BCM2837CPU *)refCon;
++		if (self != NULL && self->ipi_handler != NULL) {
++			self->ipi_handler();
++		}
++	}
++	/* Peripheral (ARMCTRL) interrupts are routed to core 0 and have no consumer yet. */
++}
++
++void
 +BCM2837CPU::initCPU(bool boot)
 +{
 +	if (!boot) {
 +		panic("BCM2837 CPU: resume is not implemented");
 +	}
 +	assert(cpu_number() == (int)getCPUNumber());
-+	assert(ml_get_interrupts_enabled());
++	uint32_t core = ml_get_topology_info()->cpus[getCPUNumber()].phys_id;
++	ml_install_interrupt_handler(NULL, 0, this, (IOInterruptHandler)&BCM2837CPU::irqHandler, this);
++	local_write(LOCAL_MBOX_IRQCTL(core), 1);
 +	ml_broadcast_cpu_event(CPU_BOOTED, getCPUNumber());
 +	setCPUState(kIOCPUStateRunning);
 +}
 +
 +void
-+BCM2837CPU::signalCPU(IOCPU *target __unused)
++BCM2837CPU::signalCPU(IOCPU *target)
 +{
-+	/* Single CPU: nothing to signal. IPIs need the BCM2836 mailbox driver. */
-+	panic("BCM2837 CPU: IPIs are not implemented");
++	uint32_t core = ml_get_topology_info()->cpus[target->getCPUNumber()].phys_id;
++	__builtin_arm_dsb(DSB_SY);
++	local_write(LOCAL_MBOX_SET(core), 1);
++	__builtin_arm_dsb(DSB_SY);
 +}
 +
 +kern_return_t
 +BCM2837CPU::startCPU(vm_offset_t start_paddr __unused, vm_offset_t arg_paddr __unused)
 +{
-+	return KERN_NOT_SUPPORTED;
++	if (releaseWord == NULL) {
++		return KERN_NOT_SUPPORTED;
++	}
++	/* The core is parked with its MMU off; it jumps to the reset vector, which finds cpu_data by MPIDR. */
++	uint64_t entry = (uint64_t)ml_static_vtop((vm_offset_t)LowResetVectorBase);
++	IOLog("BCM2837 CPU: starting cpu %u at 0x%llx\n", (unsigned)getCPUNumber(), entry);
++	__builtin_arm_dsb(DSB_SY);
++	*releaseWord = entry;
++	__builtin_arm_dsb(DSB_SY);
++	__asm__ volatile ("sev" ::: "memory");
++	return KERN_SUCCESS;
 +}
 +
 +void
