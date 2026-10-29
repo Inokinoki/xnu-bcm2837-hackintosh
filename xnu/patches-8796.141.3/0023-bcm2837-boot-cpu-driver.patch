@@ -26,7 +26,7 @@ new file mode 100644
 index 0000000..60b092e
 --- /dev/null
 +++ b/iokit/Kernel/arm/BCM2837CPU.cpp
-@@ -0,0 +1,234 @@
+@@ -0,0 +1,238 @@
 +/*
 + * SMP for the Raspberry Pi 3 (BCM2837) using XNU's legacy IOCPU interface.
 + *
