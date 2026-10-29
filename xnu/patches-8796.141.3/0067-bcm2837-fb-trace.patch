@@ -9,14 +9,20 @@
  
  	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
  	void addClient(IOMobileFramebufferUserClient *client);
-@@ -216,6 +218,17 @@
+@@ -216,6 +218,23 @@
  	AppleCLCD *fb = (AppleCLCD *)owner;
  	uint64_t now = mach_absolute_time();
  	uint64_t count = ++fb->fVsyncCount;
 +	if ((count % 1200) == 0) {
 +		static uint32_t last[128];
-+		IOLog("BCM2837 FB: heartbeat ticks %llu swaps %llu presents %llu dirty %d\n",
-+		    count, fb->fSwapsTotal, fb->fPresents, (int)fb->fDirty);
++		clock_sec_t csec;
++		clock_usec_t cusec;
++		uint64_t uptime_ns;
++		clock_get_calendar_microtime(&csec, &cusec);
++		absolutetime_to_nanoseconds(now, &uptime_ns);
++		IOLog("BCM2837 FB: heartbeat ticks %llu swaps %llu presents %llu dirty %d calendar %lu uptime-ms %llu\n",
++		    count, fb->fSwapsTotal, fb->fPresents, (int)fb->fDirty, (unsigned long)csec,
++		    (unsigned long long)(uptime_ns / 1000000));
 +		for (unsigned int i = 0; i < 128; i++) {
 +			if (fb->fSelCount[i] != last[i]) {
 +				IOLog("BCM2837 FB:   sel %u calls +%u (total %u)\n", i, fb->fSelCount[i] - last[i], fb->fSelCount[i]);
@@ -27,7 +33,7 @@
  	uint64_t values[6] = {
  		(uint32_t)count, (uint32_t)(count >> 32),
  		(uint32_t)now, (uint32_t)(now >> 32),
-@@ -285,6 +298,10 @@
+@@ -285,6 +304,10 @@
  	IOLockLock(fLock);
  	memcpy(fPending, rec, BCM2837_FB_SWAP_REC_SIZE);
  	fDirty = true;
@@ -38,7 +44,7 @@
  	IOLockUnlock(fLock);
  }
  
-@@ -293,6 +310,7 @@
+@@ -293,6 +316,7 @@
  AppleCLCD::present(const uint8_t *rec)
  {
  	uint32_t mask = get32(rec, 0x104);
@@ -46,7 +52,7 @@
  
  	if (!fConsolePaused) {
  		int quiet = 0;
-@@ -447,6 +465,10 @@
+@@ -447,6 +471,10 @@
  	uint64_t out[2] = { 0, 0 };
  	uint32_t outCount = 0;
  
