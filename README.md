@@ -127,4 +127,4 @@ shows the framebuffer itself is exact: address, pitch, channel order, centre, al
 (`cpu-release-addr` in the ADT); `BCM2837CPU::startCPU` writes the reset-vector address there and
 sends an event. IPIs use the BCM2836 local mailbox 0 (IRQ); timers stay FIQ; peripheral interrupts
 stay on core 0 (the Pi 3 has no GIC). Checked on QEMU raspi3b with the tiny init at `cpus=2` and
-`cpus=4`; the iOS 16 root reaches the lock screen at `cpus=4` (warm qcow2 overlay, about 12 min of QEMU time).
+`cpus=4`; the iOS 16 root reaches the lock screen at `cpus=4` (warm qcow2 overlay): about 11 min of wall time, while `cpus=1` from the same overlay had not reached it after 25 min (a lower bound of 2.2x; QEMU TCG runs the four cores on host threads, so real hardware will differ).
