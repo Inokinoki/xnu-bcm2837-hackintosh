@@ -1,0 +1,59 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -94,6 +94,8 @@
+ 	uint8_t       fPending[BCM2837_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
+ 	bool          fDirty;
+ 	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
++	uint64_t      fSwapsTotal, fPresents;      /* trace: SwapEnd calls, panel copies */
++	uint32_t      fSelCount[128];  /* trace: calls per user client selector */
+ 
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	void addClient(IOMobileFramebufferUserClient *client);
+@@ -216,6 +218,17 @@
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
+ 	uint64_t now = mach_absolute_time();
+ 	uint64_t count = ++fb->fVsyncCount;
++	if ((count % 1200) == 0) {
++		static uint32_t last[128];
++		IOLog("BCM2837 FB: heartbeat ticks %llu swaps %llu presents %llu dirty %d\n",
++		    count, fb->fSwapsTotal, fb->fPresents, (int)fb->fDirty);
++		for (unsigned int i = 0; i < 128; i++) {
++			if (fb->fSelCount[i] != last[i]) {
++				IOLog("BCM2837 FB:   sel %u calls +%u (total %u)\n", i, fb->fSelCount[i] - last[i], fb->fSelCount[i]);
++				last[i] = fb->fSelCount[i];
++			}
++		}
++	}
+ 	uint64_t values[6] = {
+ 		(uint32_t)count, (uint32_t)(count >> 32),
+ 		(uint32_t)now, (uint32_t)(now >> 32),
+@@ -285,6 +298,10 @@
+ 	IOLockLock(fLock);
+ 	memcpy(fPending, rec, BCM2837_FB_SWAP_REC_SIZE);
+ 	fDirty = true;
++	if (++fSwapsTotal <= 200) {
++		IOLog("BCM2837 FB: SwapEnd #%llu id %u mask 0x%x vsync tick %llu\n", fSwapsTotal,
++		    get32(rec, 0x50), get32(rec, 0x104), fVsyncCount);
++	}
+ 	IOLockUnlock(fLock);
+ }
+ 
+@@ -293,6 +310,7 @@
+ AppleCLCD::present(const uint8_t *rec)
+ {
+ 	uint32_t mask = get32(rec, 0x104);
++	fPresents++;
+ 
+ 	if (!fConsolePaused) {
+ 		int quiet = 0;
+@@ -447,6 +465,10 @@
+ 	uint64_t out[2] = { 0, 0 };
+ 	uint32_t outCount = 0;
+ 
++	if (selector < 128) {
++		fFB->fSelCount[selector]++;
++	}
++
+ 	switch (selector) {
+ 	case kSweetFBGetLayerDefaultSurface:
+ 		out[0] = sweet_surface_port_in_task(fFB->fSurface, fTask);
