@@ -95,8 +95,8 @@ CoreAnimation, backboardd, our built-in IOSurface/IOMobileFramebuffer (`AppleCLC
 the loader allocates (`FB=1125x2436 IOS_DT=d22ap.adt`, see `tools/pi3-qemu-boot.sh`; the iPhone X device tree is an
 Apple artifact: `tools/im4p-extract.py`). It takes about 50 minutes of QEMU TCG time on a single core to get there
 the first time (LaunchServices builds its database; use a qcow2 overlay, `SDFORMAT=qcow2`, to keep the state).
-Not done: input (no HID), anything past the lock screen, a real AppleMobileFileIntegrity, networking, more than
-one CPU, and any test on real hardware.
+Not done: input (no HID), anything past the lock screen, a real AppleMobileFileIntegrity, networking,
+more than one CPU on real hardware, and any test on real hardware.
 
 Bring-up notes that cost time: QEMU's generic counter runs at 62.5 MHz (the loader now measures it and patches
 the ADT, otherwise every timeout fires 3x early); `host_set_multiuser_config_flags` must work on this macOS-config
@@ -127,4 +127,4 @@ shows the framebuffer itself is exact: address, pitch, channel order, centre, al
 (`cpu-release-addr` in the ADT); `BCM2837CPU::startCPU` writes the reset-vector address there and
 sends an event. IPIs use the BCM2836 local mailbox 0 (IRQ); timers stay FIQ; peripheral interrupts
 stay on core 0 (the Pi 3 has no GIC). Checked on QEMU raspi3b with the tiny init at `cpus=2` and
-`cpus=4`; the iOS root has not been run with more than one core yet.
+`cpus=4`; the iOS 16 root reaches the lock screen at `cpus=4` (warm qcow2 overlay, about 12 min of QEMU time).
