@@ -164,6 +164,10 @@ index 0000000..60b092e
 +
 +	/* The boot CPU re-enters through cpu_machine_init -> PE_cpu_machine_init; a secondary through start_cpu. */
 +	result = processor_start(machProcessor);
++	/* processor_start does not wait for a secondary: initCPU on that core flips the state. */
++	for (int ms = 0; result == KERN_SUCCESS && !boot && getCPUState() != kIOCPUStateRunning && ms < 10000; ms++) {
++		IOSleep(1);
++	}
 +	if (result != KERN_SUCCESS || getCPUState() != kIOCPUStateRunning) {
 +		panic("BCM2837 CPU: processor_start(cpu %u) failed: %d", cpu->cpu_id, result);
 +	}
