@@ -1,0 +1,18 @@
+--- a/bsd/dev/unix_startup.c
++++ b/bsd/dev/unix_startup.c
+@@ -213,6 +213,15 @@
+ 				desiredvnodes = CONFIG_VNODES;
+ 			}
+ #endif
++#if defined(__arm64__)
++			/*
++			 * sane_size is not final yet when this runs on the BCM2837 (the table came out at
++			 * 1024 vnodes and iOS userland hit "vnode: table is full"): never go below 32768.
++			 */
++			if (desiredvnodes < 32768) {
++				desiredvnodes = 32768;
++			}
++#endif
+ 		}
+ 		vnodes_sized = 1;
+ 	}
