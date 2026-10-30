@@ -95,7 +95,7 @@ CoreAnimation, backboardd, our built-in IOSurface/IOMobileFramebuffer (`AppleCLC
 the loader allocates (`FB=1125x2436 IOS_DT=d22ap.adt`, see `tools/pi3-qemu-boot.sh`; the iPhone X device tree is an
 Apple artifact: `tools/im4p-extract.py`). It takes about 50 minutes of QEMU TCG time on a single core to get there
 the first time (LaunchServices builds its database; use a qcow2 overlay, `SDFORMAT=qcow2`, to keep the state).
-Not done: anything beyond the home screen (apps are untested),  a real AppleMobileFileIntegrity, networking,
+Not done: other apps (only Settings was tried),  a real AppleMobileFileIntegrity, networking,
 more than one CPU on real hardware, and any test on real hardware.
 
 Bring-up notes that cost time: QEMU's generic counter runs at 62.5 MHz (the loader now measures it and patches
@@ -116,6 +116,12 @@ screen simply stays as drawn (CoreAnimation only swaps when something changes, 1
 and the lock screen clock does not tick until the device is woken), which earlier looked like a display stall;
 the display path, `AppleCLCD`'s swap handling, the commpage time data and the calendar are all fine.
 `sweetfb` tracing (patch 0067) logs every SwapEnd and a heartbeat every 20 s.
+Tapping Settings on the home screen opens it (about 4 minutes of QEMU time after the tap; with `cpus=4`):
+the full iOS 16 Settings list with the profile banner, Airplane Mode, Wi-Fi, Notifications, Sounds and so on.
+That needed patch 0068: the kernel sized the vnode table at 1024 (`sane_size` is not final when
+`bsd/dev/unix_startup.c` computes it) and userland hit `vnode: table is full`; there is now a floor of 32768.
+Restoring a `savevm` snapshot keeps the guest running, but QEMU's display stays at a blank 640x480 afterwards,
+so use snapshots for sending input and a normal boot for screenshots.
 QEMU snapshots (`savevm`, `LOADVM=`) work on raspi3b and help repeat gesture tests.
 
 Screenshot gotcha: QEMU's `screendump` pads PPM rows to 4 bytes (3376 instead of 3375 for a 1125 pixel wide
