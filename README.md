@@ -95,7 +95,7 @@ CoreAnimation, backboardd, our built-in IOSurface/IOMobileFramebuffer (`AppleCLC
 the loader allocates (`FB=1125x2436 IOS_DT=d22ap.adt`, see `tools/pi3-qemu-boot.sh`; the iPhone X device tree is an
 Apple artifact: `tools/im4p-extract.py`). It takes about 50 minutes of QEMU TCG time on a single core to get there
 the first time (LaunchServices builds its database; use a qcow2 overlay, `SDFORMAT=qcow2`, to keep the state).
-Not done: input (no HID), anything past the lock screen, a real AppleMobileFileIntegrity, networking,
+Not done: anything beyond the home screen (apps are untested),  a real AppleMobileFileIntegrity, networking,
 more than one CPU on real hardware, and any test on real hardware.
 
 Bring-up notes that cost time: QEMU's generic counter runs at 62.5 MHz (the loader now measures it and patches
@@ -109,9 +109,13 @@ The kernel has HID event services for the iOS userland (xnu patches 0064/0065: I
 Apple's repo, `BCM2837HIDTouch`, `BCM2837HIDButtons`). On QEMU raspi3b, which has no touch screen, `BCM2837HIDUart`
 reads text commands from the PL011 UART (`HID=1 tools/pi3-qemu-boot.sh ...`, then `tools/qemu-touch.py SOCK swipe|tap|key`).
 Edge touches carry kIOHIDDigitizerEventFromEdgeTip as UIKit expects. State: backboardd opens both services and the
-events reach the kernel and the user client, but **no visible reaction on the lock screen yet**: after the first
-~15 frames the display stops updating at all (the lock screen clock freezes). `AppleCLCD`'s vsync-notification
-selector (72) is never called by backboardd, which is the main suspect (CoreAnimation's display link needs it).
+events reach the kernel and the user client, and **they work**: on QEMU with `cpus=4`, once the lock screen is
+up, a power key press, a tap and an upward swipe from the bottom edge (`tools/qemu-touch.py`) unlock to the home
+screen (icons, dock, status bar with a live clock; the widgets still say "Waiting..."). Without input the lock
+screen simply stays as drawn (CoreAnimation only swaps when something changes, 11 SwapEnds in the first 25 min,
+and the lock screen clock does not tick until the device is woken), which earlier looked like a display stall;
+the display path, `AppleCLCD`'s swap handling, the commpage time data and the calendar are all fine.
+`sweetfb` tracing (patch 0067) logs every SwapEnd and a heartbeat every 20 s.
 QEMU snapshots (`savevm`, `LOADVM=`) work on raspi3b and help repeat gesture tests.
 
 Screenshot gotcha: QEMU's `screendump` pads PPM rows to 4 bytes (3376 instead of 3375 for a 1125 pixel wide
