@@ -1,3 +1,4 @@
+Skip the stackshot count consistency panics on BCM2837 (the writes stay bounded).
 --- a/osfmk/kern/kern_stackshot.c
 +++ b/osfmk/kern/kern_stackshot.c
 @@ -2893,13 +2893,21 @@
