@@ -1,6 +1,14 @@
 --- a/iokit/Kernel/arm/SweetFramebuffer.cpp
 +++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
-@@ -94,6 +94,8 @@
+@@ -42,6 +42,7 @@
+ #include <IOKit/system.h>
+ #include <pexpert/pexpert.h>
+ #include <kern/clock.h>
++#include <arm/cpu_capabilities.h>
+ #include <sys/proc.h>
+ 
+ enum {
+@@ -94,6 +95,8 @@
  	uint8_t       fPending[BCM2837_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
  	bool          fDirty;
  	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
@@ -9,7 +17,7 @@
  
  	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
  	void addClient(IOMobileFramebufferUserClient *client);
-@@ -216,6 +218,23 @@
+@@ -216,6 +219,28 @@
  	AppleCLCD *fb = (AppleCLCD *)owner;
  	uint64_t now = mach_absolute_time();
  	uint64_t count = ++fb->fVsyncCount;
@@ -23,6 +31,11 @@
 +		IOLog("BCM2837 FB: heartbeat ticks %llu swaps %llu presents %llu dirty %d calendar %lu uptime-ms %llu\n",
 +		    count, fb->fSwapsTotal, fb->fPresents, (int)fb->fDirty, (unsigned long)csec,
 +		    (unsigned long long)(uptime_ns / 1000000));
++		{
++			const volatile uint64_t *td = (const volatile uint64_t *)(_COMM_PAGE_NEWTIMEOFDAY_DATA + _COMM_PAGE_RW_OFFSET);
++			IOLog("BCM2837 FB:   commpage time tick 0x%llx sec %llu frac 0x%llx scale 0x%llx per_sec %llu now 0x%llx\n",
++			    td[0], td[1], td[2], td[3], td[4], now);
++		}
 +		for (unsigned int i = 0; i < 128; i++) {
 +			if (fb->fSelCount[i] != last[i]) {
 +				IOLog("BCM2837 FB:   sel %u calls +%u (total %u)\n", i, fb->fSelCount[i] - last[i], fb->fSelCount[i]);
@@ -33,7 +46,7 @@
  	uint64_t values[6] = {
  		(uint32_t)count, (uint32_t)(count >> 32),
  		(uint32_t)now, (uint32_t)(now >> 32),
-@@ -285,6 +304,10 @@
+@@ -285,6 +310,10 @@
  	IOLockLock(fLock);
  	memcpy(fPending, rec, BCM2837_FB_SWAP_REC_SIZE);
  	fDirty = true;
@@ -44,7 +57,7 @@
  	IOLockUnlock(fLock);
  }
  
-@@ -293,6 +316,7 @@
+@@ -293,6 +322,7 @@
  AppleCLCD::present(const uint8_t *rec)
  {
  	uint32_t mask = get32(rec, 0x104);
@@ -52,7 +65,7 @@
  
  	if (!fConsolePaused) {
  		int quiet = 0;
-@@ -447,6 +471,10 @@
+@@ -447,6 +477,10 @@
  	uint64_t out[2] = { 0, 0 };
  	uint32_t outCount = 0;
  
