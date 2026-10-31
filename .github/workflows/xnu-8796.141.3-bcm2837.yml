@@ -92,7 +92,7 @@ jobs:
           retag = (
               '\n            FH="${FAKEROOT_DIR}/usr/local/lib/kernel/libfirehose_kernel.a"'
               '\n            if [ -f "$FH" ]; then FHT=$(mktemp -d); ('
-              'cd "$FHT" && ar x "$FH" && for o in *.o; do xcrun vtool -set-build-version ios 16.0 16.0 -replace -output "$o.new" "$o" && mv "$o.new" "$o"; done && rm -f "$FH" && ar rcs "$FH" *.o); fi'
+              'cd "$FHT" && ar x "$FH" && for o in *.o; do (xcrun vtool -set-build-version ios 16.0 16.0 -replace -output "$o.new" "$o" || xcrun ld -r -arch arm64 -platform_version ios 16.0 16.0 "$o" -o "$o.new") && mv "$o.new" "$o"; done && rm -f "$FH" && ar rcs "$FH" *.o); fi'
           )
           p.write_text(s[:j] + retag + s[j:])
           PY
