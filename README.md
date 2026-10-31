@@ -188,5 +188,15 @@ idle and `BCM2837CPU::haltCPU` panics).
 
 Status on QEMU (`cpus=4`): the iOS-platform kernel unlocks to the home screen, opens Settings > General > About
 (showing `Raspberry Pi 3B`) and Safari (start page), about 43 minutes without a panic. Not done: idle and
-low-memory (jetsam) behaviour, real hardware. The runner `macos-14` is retired on 2026-11-02; `macos-15` only
-ships Xcode 16, whose `iig` output this xnu does not accept, so the workflows need a different Xcode source.
+low-memory (jetsam) behaviour, real hardware.
+
+CI runs on `macos-15` with Xcode 16.4 (`macos-14` is retired on 2026-11-02; both workflows take `runner` and
+`xcode` inputs). Moving to Xcode 16 needed: 0071 (`IORPC.kernelContent`, which Xcode 16's `iig` output reads),
+`libfirehose_kernel` built with the iphoneos SDK plus the macosx SDK's `usr/include` for `Availability.h`, and
+0035 making HFS see the OS X `TargetConditionals.h` (an iPhoneOS-platform build would otherwise switch HFS to
+its iOS feature set: `AppleKeyStore`, no encodings). Both the iOS- and the macOS-platform workflows pass there,
+and the iOS-platform kernel built on `macos-15` boots to the home screen on QEMU.
+
+Open items: widgets on the home screen stay at "Waiting..." (chronod runs, but no widget extension is ever
+started), and the lock-screen text / dock material sometimes renders red (R near 255 with G = B varying over
+time; suspected luminance-alpha `LA08` intermediate surfaces, not confirmed).
