@@ -76,7 +76,11 @@ jobs:
           s = p.read_text()
           old = 'SDKROOT=macosx TARGET_CONFIGS='
           assert s.count(old) == 3, s.count(old)
-          p.write_text(s.replace(old, 'SDKROOT=iphoneos TARGET_CONFIGS='))
+          s = s.replace(old, 'SDKROOT=iphoneos TARGET_CONFIGS=')
+          # libfirehose_kernel is linked into the kernel, so it must be built for iOS too
+          old = 'xcodebuild install -target libfirehose_kernel -sdk macosx '
+          assert s.count(old) == 1, s.count(old)
+          p.write_text(s.replace(old, 'xcodebuild install -target libfirehose_kernel -sdk iphoneos '))
           PY
           ls dxb/patches
 
