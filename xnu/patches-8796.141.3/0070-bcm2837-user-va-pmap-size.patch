@@ -7,11 +7,11 @@
 -#  ifdef XNU_TARGET_OS_OSX
 +#  if defined(ARM64_BOARD_CONFIG_BCM2837)
 +/*
-+ * BCM2837 is built as a macOS platform (47-bit MACH_VM_MAX_ADDRESS) but runs 4K pages with
-+ * T0SZ 25, so a user pmap covers 39 bits. With the 47-bit default vm_map handed WebContent
-+ * addresses the pmap cannot map ("pmap_remove_options(): invalid address range").
++ * BCM2837 is built as a macOS platform (47-bit MACH_VM_MAX_ADDRESS) but runs 4K pages, where a user
++ * pmap covers only 64 - T0SZ_BOOT bits. With the 47-bit default vm_map handed WebContent addresses the
++ * pmap cannot map ("pmap_remove_options(): invalid address range"). Stay 256 MB below the end.
 + */
-+SECURITY_READ_ONLY_LATE(vm_map_offset_t) arm64_pmap_max_offset_default = 0x0000007FF0000000ULL;
++SECURITY_READ_ONLY_LATE(vm_map_offset_t) arm64_pmap_max_offset_default = (1ULL << (64 - T0SZ_BOOT)) - 0x10000000ULL;
 +#  elif defined(XNU_TARGET_OS_OSX)
  SECURITY_READ_ONLY_LATE(vm_map_offset_t) arm64_pmap_max_offset_default = MACH_VM_MAX_ADDRESS;
  #  else
