@@ -70,10 +70,10 @@ jobs:
           s = p.read_text()
           old = 'ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"'
           assert s.count(old) == 1, s.count(old)
-          new = 'ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS=\'$(inherited) -mcpu=cortex-a53\''
+          new = 'ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS="\\$(inherited) -mcpu=cortex-a53 -isystem $(xcrun --sdk macosx --show-sdk-path)/usr/include"'
           p.write_text(s.replace(old, new))
           PY
-          grep -c "OTHER_CFLAGS='\$(inherited) -mcpu=cortex-a53'" dxb/build.sh
+          grep -c -e '-mcpu=cortex-a53 -isystem' dxb/build.sh
           # the kernel itself is built for the iPhoneOS platform; the header install and the
           # build tools keep the macosx SDK
           python3 - <<'PY'
@@ -83,18 +83,11 @@ jobs:
           old = 'SDKROOT=macosx TARGET_CONFIGS='
           assert s.count(old) == 3, s.count(old)
           s = s.replace(old, 'SDKROOT=iphoneos TARGET_CONFIGS=')
-          # libfirehose_kernel is still built with the macosx SDK (the iphoneos SDK build cannot find
-          # Availability.h), but the iOS kernel links it: retag its objects as iOS right after build.sh renames it into place.
-          marker = 'mv "${FAKEROOT_DIR}/usr/local/lib/kernel/liblibfirehose_kernel.a" '
-          assert s.count(marker) == 1, s.count(marker)
-          i = s.index(marker)
-          j = s.index('\n', i)
-          retag = (
-              '\n            FH="${FAKEROOT_DIR}/usr/local/lib/kernel/libfirehose_kernel.a"'
-              '\n            if [ -f "$FH" ]; then FHT=$(mktemp -d); ('
-              'cd "$FHT" && ar x "$FH" && for o in *.o; do (xcrun vtool -set-build-version ios 16.0 16.0 -replace -output "$o.new" "$o" || xcrun ld -r -arch arm64 -platform_version ios 16.0 16.0 "$o" -o "$o.new") && mv "$o.new" "$o"; done && rm -f "$FH" && ar rcs "$FH" *.o); fi'
-          )
-          p.write_text(s[:j] + retag + s[j:])
+          # libfirehose_kernel is linked into the kernel, so it is built for iOS too; the iphoneos SDK build
+          # does not find Availability.h on its own, the macosx SDK's usr/include (OTHER_CFLAGS above) fills in
+          old = 'xcodebuild install -target libfirehose_kernel -sdk macosx '
+          assert s.count(old) == 1, s.count(old)
+          p.write_text(s.replace(old, 'xcodebuild install -target libfirehose_kernel -sdk iphoneos '))
           PY
           ls dxb/patches
 
