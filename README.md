@@ -180,4 +180,4 @@ retagged as iOS with `vtool`; the iPhoneOS install puts the kernel at the root o
 the platform's `MACH_VM_MAX_ADDRESS` (64 GB), and `sleep-disabled` in the ADT `/defaults` (the iOS
 IOPMrootDomain suspends when idle and `BCM2837CPU::haltCPU` panics). Status: with those, the iOS-platform
 kernel (`cpus=4`, QEMU) unlocks to the home screen and opens Settings > General > About for 43 minutes without a
-panic, showing `Raspberry Pi 3B`; Safari has not been run on it yet.
+panic, showing `Raspberry Pi 3B`, and Safari opens on it too (start page, about 7 minutes after the tap).
