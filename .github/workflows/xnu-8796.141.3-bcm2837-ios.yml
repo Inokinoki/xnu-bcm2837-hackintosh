@@ -118,6 +118,9 @@ jobs:
         run: |
           mkdir -p out
           cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
+          # the iPhoneOS-platform install puts the kernel at the root of the fakeroot, as mach.*
+          cp dxb/fakeroot/mach.development.bcm2837 out/kernel.development.bcm2837 2>/dev/null || true
+          ls dxb/fakeroot | head -20
           ls -la out
           (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
 
