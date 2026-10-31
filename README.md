@@ -197,6 +197,13 @@ CI runs on `macos-15` with Xcode 16.4 (`macos-14` is retired on 2026-11-02; both
 its iOS feature set: `AppleKeyStore`, no encodings). Both the iOS- and the macOS-platform workflows pass there,
 and the iOS-platform kernel built on `macos-15` boots to the home screen on QEMU.
 
-Open items: widgets on the home screen stay at "Waiting..." (chronod runs, but no widget extension is ever
-started), and the lock-screen text / dock material sometimes renders red (R near 255 with G = B varying over
-time; suspected luminance-alpha `LA08` intermediate surfaces, not confirmed).
+Widgets: the default home screen layout holds Weather, Calendar, Maps, Notes, News, Tips and Stocks widgets, but
+those apps are not in the root image (it has the services and Photos, App Store, Settings, Phone, Safari and
+Messages), so the widgets stayed at "Waiting..." (chronod runs but has no extension to start).
+`tools/ios-root-no-widgets.sh BASE.qcow2 NEW.qcow2` drops the widget stacks from SpringBoard's `IconState.plist`
+in a new qcow2 overlay; the home screen is then just the icons. `tools/ios-root-runatload.sh` (RunAtLoad for a
+launchd job, e.g. `com.apple.chronod`) is the helper used to rule chronod out. Getting real widgets would need
+the missing apps added to the root image.
+
+Open item: the lock-screen text / dock material sometimes renders red (R near 255 with G = B varying over time;
+suspected luminance-alpha `LA08` intermediate surfaces, not confirmed).
