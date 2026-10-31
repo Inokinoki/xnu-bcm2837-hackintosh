@@ -77,10 +77,18 @@ jobs:
           old = 'SDKROOT=macosx TARGET_CONFIGS='
           assert s.count(old) == 3, s.count(old)
           s = s.replace(old, 'SDKROOT=iphoneos TARGET_CONFIGS=')
-          # libfirehose_kernel is linked into the kernel, so it must be built for iOS too
-          old = 'xcodebuild install -target libfirehose_kernel -sdk macosx '
-          assert s.count(old) == 1, s.count(old)
-          p.write_text(s.replace(old, 'xcodebuild install -target libfirehose_kernel -sdk iphoneos '))
+          # libfirehose_kernel is still built with the macosx SDK (the iphoneos SDK build cannot find
+          # Availability.h), but the iOS kernel links it: retag its objects as iOS right after it is built.
+          marker = 'xcodebuild install -target libfirehose_kernel -sdk macosx '
+          assert s.count(marker) == 1, s.count(marker)
+          i = s.index(marker)
+          j = s.index('\n', i)
+          retag = (
+              '\n            FH="${FAKEROOT_DIR}/usr/local/lib/kernel/libfirehose_kernel.a"'
+              '\n            if [ -f "$FH" ]; then FHT=$(mktemp -d); ('
+              'cd "$FHT" && ar x "$FH" && for o in *.o; do xcrun vtool -set-build-version ios 16.0 16.0 -replace -output "$o.new" "$o" && mv "$o.new" "$o"; done && rm -f "$FH" && ar rcs "$FH" *.o); fi'
+          )
+          p.write_text(s[:j] + retag + s[j:])
           PY
           ls dxb/patches
 
