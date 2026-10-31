@@ -1,0 +1,21 @@
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -480,7 +480,17 @@
+ _Static_assert((ARM64_MAX_OFFSET_DEVICE_SMALL > ARM64_MIN_MAX_ADDRESS) && (ARM64_MAX_OFFSET_DEVICE_SMALL <= MACH_VM_MAX_ADDRESS),
+     "Small device address space size outside allowable range");
+ 
+-#  ifdef XNU_TARGET_OS_OSX
++#  if defined(ARM64_BOARD_CONFIG_BCM2837)
++/*
++ * BCM2837 is built as a macOS platform (47-bit MACH_VM_MAX_ADDRESS) but runs 4K pages, where a user
++ * pmap covers only 64 - T0SZ_BOOT bits. With the 47-bit default vm_map handed WebContent addresses the
++ * pmap cannot map ("pmap_remove_options(): invalid address range"). Stay 256 MB below the end.
++ */
++#define BCM2837_PMAP_USER_END ((1ULL << (64 - T0SZ_BOOT)) - 0x10000000ULL)
++/* the iOS platform's MACH_VM_MAX_ADDRESS (64 GB) is lower than what the pmap covers */
++SECURITY_READ_ONLY_LATE(vm_map_offset_t) arm64_pmap_max_offset_default =
++    (BCM2837_PMAP_USER_END < MACH_VM_MAX_ADDRESS) ? BCM2837_PMAP_USER_END : MACH_VM_MAX_ADDRESS;
++#  elif defined(XNU_TARGET_OS_OSX)
+ SECURITY_READ_ONLY_LATE(vm_map_offset_t) arm64_pmap_max_offset_default = MACH_VM_MAX_ADDRESS;
+ #  else
+ SECURITY_READ_ONLY_LATE(vm_map_offset_t) arm64_pmap_max_offset_default = 0x0;

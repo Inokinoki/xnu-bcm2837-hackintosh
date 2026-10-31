@@ -1,8 +1,9 @@
 name: xnu-8796.141.3-bcm2837
 
-# Builds xnu-8796.141.3 (macOS 13.5, the iOS 16 generation) for the Raspberry Pi 3
-# (BCM2837) machine config, using blacktop/darwin-xnu-build the same way
-# ios-sweet's xnu.yml does. The patches live in xnu/patches-8796.141.3/.
+# Default kernel build: xnu-8796.141.3 for the Raspberry Pi 3 (BCM2837) machine config, built for the
+# iPhoneOS platform (SDKROOT=iphoneos, PLATFORM=iPhoneOS, XNU_TARGET_OS_IOS) because the target is the
+# iOS 16 userland. Patches: the shared ones (xnu/patches-8796.141.3/) plus the iOS-only ones
+# (xnu/patches-ios-8796.141.3/). The macOS-platform variant is xnu-8796.141.3-bcm2837-macos.yml.
 
 on:
   workflow_dispatch:
@@ -16,10 +17,17 @@ on:
       keep_going:
         description: make -k (collect all compile errors in one run)
         default: "true"
+      runner:
+        description: runner label (macos-14 is retired on 2026-11-02)
+        default: macos-15
+      xcode:
+        description: Xcode to select (macos-15 has 16.x and 26.x; 16.4 is the one this xnu builds with)
+        default: "16.4"
   push:
-    branches: [xnu-8796-bcm2837]
+    branches: [master, xnu-8796-bcm2837, rootfs-ramdisk]
     paths:
       - "xnu/patches-8796.141.3/**"
+      - "xnu/patches-ios-8796.141.3/**"
       - ".github/workflows/xnu-8796.141.3-bcm2837.yml"
 
 concurrency:
@@ -35,9 +43,9 @@ env:
 
 jobs:
   build:
-    # macos-14 ships Xcode 15.x, whose iig matches the xnu-8796.141.3 IORPC ABI
-    # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks).
-    runs-on: macos-14
+    # macos-14 (Xcode 15/16.2) is retired on 2026-11-02. macos-15 has Xcode 16.x and 26.x; Xcode 16.4's iig
+    # emits IORPC.kernelContent, which patch 0071 adds to this xnu.
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +57,9 @@ jobs:
           git -C dxb checkout -q FETCH_HEAD
           # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
           cp xnu/patches-8796.141.3/*.patch xnu/patches-8796.141.3/*.sh dxb/patches/
+          # iOS-only patches sort after the shared ones (10xx names)
+          cp xnu/patches-ios-8796.141.3/*.patch dxb/patches/ 2>/dev/null || true
+          cp xnu/patches-ios-8796.141.3/*.sh dxb/patches/ 2>/dev/null || true
           # libfirehose_kernel is built for x86_64/arm64e by default; the BCM2837 kernel
           # links only its arm64 slice, and that slice must target the Pi 3's Cortex-A53
           # (ARMv8.0): the default Apple CPU emits LSE atomics (ldadd), which trap there.
@@ -59,10 +70,25 @@ jobs:
           s = p.read_text()
           old = 'ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"'
           assert s.count(old) == 1, s.count(old)
-          new = 'ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS=\'$(inherited) -mcpu=cortex-a53\''
+          new = 'ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS="\\$(inherited) -mcpu=cortex-a53 -isystem $(xcrun --sdk macosx --show-sdk-path)/usr/include"'
           p.write_text(s.replace(old, new))
           PY
-          grep -c "OTHER_CFLAGS='\$(inherited) -mcpu=cortex-a53'" dxb/build.sh
+          grep -c -e '-mcpu=cortex-a53 -isystem' dxb/build.sh
+          # the kernel itself is built for the iPhoneOS platform; the header install and the
+          # build tools keep the macosx SDK
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('dxb/build.sh')
+          s = p.read_text()
+          old = 'SDKROOT=macosx TARGET_CONFIGS='
+          assert s.count(old) == 3, s.count(old)
+          s = s.replace(old, 'SDKROOT=iphoneos TARGET_CONFIGS=')
+          # libfirehose_kernel is linked into the kernel, so it is built for iOS too; the iphoneos SDK build
+          # does not find Availability.h on its own, the macosx SDK's usr/include (OTHER_CFLAGS above) fills in
+          old = 'xcodebuild install -target libfirehose_kernel -sdk macosx '
+          assert s.count(old) == 1, s.count(old)
+          p.write_text(s.replace(old, 'xcodebuild install -target libfirehose_kernel -sdk iphoneos '))
+          PY
           ls dxb/patches
 
       - name: Deps
@@ -74,6 +100,7 @@ jobs:
           sw_vers
           ls -d /Applications/Xcode*.app
           XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          XC=/Applications/Xcode_${{ inputs.xcode || '16.4' }}.app
           echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
           sudo xcode-select -s "$XC"
           xcodebuild -version
@@ -91,6 +118,9 @@ jobs:
         run: |
           mkdir -p out
           cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
+          # the iPhoneOS-platform install puts the kernel at the root of the fakeroot, as mach.*
+          cp dxb/fakeroot/mach.development.bcm2837 out/kernel.development.bcm2837 2>/dev/null || true
+          ls dxb/fakeroot | head -20
           ls -la out
           (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
 

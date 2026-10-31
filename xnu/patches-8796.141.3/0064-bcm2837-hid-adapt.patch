@@ -1,0 +1,288 @@
+--- a/iokit/Kernel/arm/hid/IOHIDDebug.h
++++ b/iokit/Kernel/arm/hid/IOHIDDebug.h
+@@ -9,29 +9,23 @@
+ #ifndef IOHIDDebug_h
+ #define IOHIDDebug_h
+ 
+-#include <os/log.h>
++#include <IOKit/IOLib.h>
+ 
+-typedef enum {
+-    kHIDLogCategoryDefault,
+-    kHIDLogCategoryCount
+-} HIDLogCategory;
+-
+-__BEGIN_DECLS
+-// noinline to reduce binary size
+-os_log_t _HIDLogCategory(HIDLogCategory category) __attribute__ ((noinline));
+-__END_DECLS
+-
+-#define HIDLog(fmt, ...)        os_log(_HIDLogCategory(kHIDLogCategoryDefault), fmt "\n", ##__VA_ARGS__)
+-#define HIDLogError(fmt, ...)   os_log_error(_HIDLogCategory(kHIDLogCategoryDefault), fmt "\n", ##__VA_ARGS__)
+-#define HIDLogDebug(fmt, ...)   os_log_debug(_HIDLogCategory(kHIDLogCategoryDefault), fmt "\n", ##__VA_ARGS__)
+-#define HIDLogInfo(fmt, ...)    os_log_info(_HIDLogCategory(kHIDLogCategoryDefault), fmt "\n", ##__VA_ARGS__)
+-#define HIDLogFault(fmt, ...)   os_log_fault(_HIDLogCategory(kHIDLogCategoryDefault), fmt "\n", ##__VA_ARGS__)
+-
+-#define HIDServiceLogFault(fmt, ...)   HIDLogFault("%s:0x%llx " fmt "\n", getName(), getRegistryEntryID(), ##__VA_ARGS__)
+-#define HIDServiceLogError(fmt, ...)   HIDLogError("%s:0x%llx " fmt "\n", getName(), getRegistryEntryID(), ##__VA_ARGS__)
+-#define HIDServiceLog(fmt, ...)        HIDLog("%s:0x%llx " fmt "\n", getName(), getRegistryEntryID(), ##__VA_ARGS__)
+-#define HIDServiceLogInfo(fmt, ...)    HIDLogInfo("%s:0x%llx " fmt "\n", getName(), getRegistryEntryID(), ##__VA_ARGS__)
+-#define HIDServiceLogDebug(fmt, ...)   HIDLogDebug("%s:0x%llx " fmt "\n", getName(), getRegistryEntryID(), ##__VA_ARGS__)
++/*
++ * BCM2837: HID logging goes to the kernel console (and so the persistent
++ * log) instead of os_log, so the HID path is visible in boot logs.
++ */
++#define HIDLog(fmt, ...)        IOLog("HID: " fmt "\n", ##__VA_ARGS__)
++#define HIDLogError(fmt, ...)   IOLog("HID error: " fmt "\n", ##__VA_ARGS__)
++#define HIDLogDebug(fmt, ...)   do { } while (0)
++#define HIDLogInfo(fmt, ...)    do { } while (0)
++#define HIDLogFault(fmt, ...)   IOLog("HID fault: " fmt "\n", ##__VA_ARGS__)
++
++#define HIDServiceLogFault(fmt, ...)   HIDLogFault("%s:0x%llx " fmt, getName(), getRegistryEntryID(), ##__VA_ARGS__)
++#define HIDServiceLogError(fmt, ...)   HIDLogError("%s:0x%llx " fmt, getName(), getRegistryEntryID(), ##__VA_ARGS__)
++#define HIDServiceLog(fmt, ...)        HIDLog("%s:0x%llx " fmt, getName(), getRegistryEntryID(), ##__VA_ARGS__)
++#define HIDServiceLogInfo(fmt, ...)    do { } while (0)
++#define HIDServiceLogDebug(fmt, ...)   do { } while (0)
+ 
+ #endif /* IOHIDDebug_h */
+ 
+--- a/iokit/Kernel/arm/hid/IOHIDDeviceTypes.h
++++ b/iokit/Kernel/arm/hid/IOHIDDeviceTypes.h
+@@ -25,7 +25,10 @@
+ #ifndef IOHIDDeviceTypes_h
+ #define IOHIDDeviceTypes_h
+ 
+-#include <TargetConditionals.h>
++/* BCM2837: kernel build, no SDK TargetConditionals.h */
++#ifndef TARGET_OS_DRIVERKIT
++#define TARGET_OS_DRIVERKIT 0
++#endif
+ 
+ #if TARGET_OS_DRIVERKIT
+ #include <DriverKit/IOTypes.h>
+--- a/iokit/Kernel/arm/hid/IOHIDEvent.cpp
++++ b/iokit/Kernel/arm/hid/IOHIDEvent.cpp
+@@ -33,7 +33,10 @@
+ #include "IOHIDEventData.h"
+ #include "IOHIDUsageTables.h"
+ #include "IOHIDPrivateKeys.h"
+-#include <math.h>
++/* BCM2837: no <math.h> in the kernel; only NAN is used */
++#ifndef NAN
++#define NAN __builtin_nanf("")
++#endif
+ #include <os/overflow.h>
+ 
+ #include "ev_keymap.h"
+--- a/iokit/Kernel/arm/hid/IOHIDEvent.h
++++ b/iokit/Kernel/arm/hid/IOHIDEvent.h
+@@ -24,16 +24,19 @@
+ #ifndef _IOKIT_IOHIDEVENT_H
+ #define _IOKIT_IOHIDEVENT_H
+ 
+-#include <TargetConditionals.h>
++/* BCM2837: kernel build, no SDK TargetConditionals.h */
++#ifndef TARGET_OS_DRIVERKIT
++#define TARGET_OS_DRIVERKIT 0
++#endif
+ #if KERNEL
+ #include <libkern/c++/OSObject.h>
+ #include <libkern/c++/OSArray.h>
+ #include <libkern/c++/OSData.h>
+ #endif /*KERNEL*/
+ #include <IOKit/IOTypes.h>
+-#include <IOKit/hid/IOHIDEventTypes.h>
++#include "IOHIDEventTypes.h"
+ 
+-#include <IOKit/hidsystem/IOLLEvent.h>
++#include "IOLLEvent.h"
+ 
+ #define ALIGNED_DATA_SIZE(data_size,align_size) ((((data_size - 1) / align_size) + 1) * align_size)
+ 
+--- a/iokit/Kernel/arm/hid/IOHIDEventData.h
++++ b/iokit/Kernel/arm/hid/IOHIDEventData.h
+@@ -30,7 +30,7 @@
+ #include <HIDDriverKit/IOHIDEventTypes.h>
+ #else
+ #include <IOKit/IOTypes.h>
+-#include <IOKit/hid/IOHIDEventTypes.h>
++#include "IOHIDEventTypes.h"
+ #endif
+ 
+ #ifdef KERNEL
+@@ -38,7 +38,7 @@
+ 
+ #define IOHIDEventRef IOHIDEvent *
+ #else
+-//#include <IOKit/hid/IOHIDEvent.h>
++//#include "IOHIDEvent.h"
+ typedef struct IOHIDEventData IOHIDEventData;
+ #endif
+ 
+@@ -95,7 +95,7 @@
+ #if TARGET_OS_DRIVERKIT
+ #include <HIDDriverKit/IOHIDEventStructDefs.h>
+ #else
+-#include <IOKit/hid/IOHIDEventStructDefs.h>
++#include "IOHIDEventStructDefs.h"
+ #endif
+ 
+ enum {
+@@ -248,7 +248,7 @@
+ #if TARGET_OS_DRIVERKIT
+ #include <HIDDriverKit/IOHIDEventMacroDefs.h>
+ #else
+-#include <IOKit/hid/IOHIDEventMacroDefs.h>
++#include "IOHIDEventMacroDefs.h"
+ #endif
+ 
+ #endif /* _IOKIT_HID_IOHIDEVENTDATA_H */
+--- a/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
++++ b/iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp
+@@ -29,7 +29,7 @@
+ #include "IOHIDDebug.h"
+ #include <sys/proc.h>
+ #include <IOKit/IOKitKeys.h>
+-#include <IOKit/hidsystem/IOHIDShared.h>
++#include "IOHIDShared.h"
+ #include "IOHIDFamilyTrace.h"
+ #include <pexpert/pexpert.h>
+ 
+@@ -442,7 +442,7 @@
+         length = outEvent->getLength();
+         
+         if ( length > arguments->structureOutputSize ) {
+-            HIDLogError("event length:%d expected:%d", (unsigned int)length, arguments->structureOutputSize);
++            HIDLogError("event length:%u expected:%u", (unsigned int)length, arguments->structureOutputSize);
+             ret = kIOReturnBadArgument;
+             break;
+         }
+--- a/iokit/Kernel/arm/hid/IOHIDEventTypes.h
++++ b/iokit/Kernel/arm/hid/IOHIDEventTypes.h
+@@ -25,7 +25,10 @@
+ #ifndef _IOKIT_IOHIDEVENTTYPES_H
+ #define _IOKIT_IOHIDEVENTTYPES_H /* { */
+ 
+-#include <TargetConditionals.h>
++/* BCM2837: kernel build, no SDK TargetConditionals.h */
++#ifndef TARGET_OS_DRIVERKIT
++#define TARGET_OS_DRIVERKIT 0
++#endif
+ 
+ #if TARGET_OS_DRIVERKIT
+ #include <DriverKit/IOTypes.h>
+@@ -144,7 +147,7 @@
+ #if TARGET_OS_DRIVERKIT
+ #include <HIDDriverKit/IOHIDEventFieldDefs.h>
+ #else
+-#include <IOKit/hid/IOHIDEventFieldDefs.h>
++#include "IOHIDEventFieldDefs.h"
+ #endif
+ 
+ enum  {
+--- a/iokit/Kernel/arm/hid/IOHIDKeys.h
++++ b/iokit/Kernel/arm/hid/IOHIDKeys.h
+@@ -26,12 +26,12 @@
+ #define _IOKIT_HID_IOHIDKEYS_H_
+ 
+ #include <sys/cdefs.h>
+-#include <IOKit/hidsystem/IOHIDParameter.h>
++#include "IOHIDParameter.h"
+ #include <IOKit/IOReturn.h>
+ #include <IOKit/IOMessage.h>
+-#include <IOKit/hid/IOHIDProperties.h>
+-#include <IOKit/hid/IOHIDDeviceTypes.h>
+-#include <IOKit/hid/IOHIDDeviceKeys.h>
++#include "IOHIDProperties.h"
++#include "IOHIDDeviceTypes.h"
++#include "IOHIDDeviceKeys.h"
+ 
+ __BEGIN_DECLS
+ 
+--- a/iokit/Kernel/arm/hid/IOHIDParameter.h
++++ b/iokit/Kernel/arm/hid/IOHIDParameter.h
+@@ -37,9 +37,9 @@
+ #define _DEV_EVSIO_H
+ 
+ /* Public type definitions. */
+-#include <IOKit/hidsystem/IOHIDTypes.h>
+-#include <IOKit/hidsystem/IOLLEvent.h>
+-#include <IOKit/hid/IOHIDProperties.h>
++#include "IOHIDTypes.h"
++#include "IOLLEvent.h"
++#include "IOHIDProperties.h"
+ 
+ /*
+  * Identify this driver as one that uses the new driverkit and messaging API
+--- a/iokit/Kernel/arm/hid/IOHIDPrivateKeys.h
++++ b/iokit/Kernel/arm/hid/IOHIDPrivateKeys.h
+@@ -26,9 +26,9 @@
+ #define _IOKIT_HID_IOHIDPRIVATEKEYS_H_
+ 
+ #include <sys/cdefs.h>
+-#include <IOKit/hid/IOHIDKeys.h>
+-#include <IOKit/hid/IOHIDProperties.h>
+-#include <IOKit/hid/IOHIDEventServiceKeys_Private.h>
++#include "IOHIDKeys.h"
++#include "IOHIDProperties.h"
++#include "IOHIDEventServiceKeys_Private.h"
+ 
+ __BEGIN_DECLS
+ 
+--- a/iokit/Kernel/arm/hid/IOHIDProperties.h
++++ b/iokit/Kernel/arm/hid/IOHIDProperties.h
+@@ -24,7 +24,7 @@
+ #ifndef IOHIDProperties_h
+ #define IOHIDProperties_h
+ 
+-#include <IOKit/hid/IOHIDEventServiceKeys.h>
++#include "IOHIDEventServiceKeys.h"
+ 
+ /*!
+  * @define      kIOHIDMouseAccelerationType
+--- a/iokit/Kernel/arm/hid/IOHIDShared.h
++++ b/iokit/Kernel/arm/hid/IOHIDShared.h
+@@ -36,9 +36,9 @@
+ #endif /* KERNEL */
+ 
+ #include <IOKit/IOReturn.h>
+-#include <IOKit/graphics/IOGraphicsTypes.h>
+-#include <IOKit/hidsystem/IOHIDTypes.h>
+-#include <IOKit/hidsystem/IOLLEvent.h>
++#include "IOGraphicsTypes.h"
++#include "IOHIDTypes.h"
++#include "IOLLEvent.h"
+ 
+ /*
+  * Identify this driver as one that uses the new driverkit and messaging API
+@@ -257,7 +257,7 @@
+ 
+ #ifndef KERNEL
+ #ifndef _IOKIT_IOHIDLIB_H
+-#include <IOKit/hidsystem/IOHIDLib.h>
++#include "IOHIDLib.h"
+ #endif
+ #endif /* !KERNEL */
+ 
+--- a/iokit/Kernel/arm/hid/IOHIDTypes.h
++++ b/iokit/Kernel/arm/hid/IOHIDTypes.h
+@@ -38,7 +38,7 @@
+ 
+ #include <mach/boolean.h>
+ #include <libkern/OSAtomic.h>
+-#include <IOKit/graphics/IOGraphicsTypes.h>
++#include "IOGraphicsTypes.h"
+ 
+ // This should be removed, but is being used by others
+ // <rdar://problem/8917741> IOHIDFamily-355 causes projects to fail to build with 'ev_lock_data_t' does not name a type
+--- a/iokit/Kernel/arm/hid/IOLLEvent.h
++++ b/iokit/Kernel/arm/hid/IOLLEvent.h
+@@ -46,7 +46,7 @@
+ #define _DEV_EVENT_H
+ 
+ #include <libkern/OSTypes.h>
+-#include <IOKit/hidsystem/IOHIDTypes.h>
++#include "IOHIDTypes.h"
+ #include <mach/mach_types.h>
+ 
+ #ifdef EVENT_H		/* Interlock with dpsclient/event.h */

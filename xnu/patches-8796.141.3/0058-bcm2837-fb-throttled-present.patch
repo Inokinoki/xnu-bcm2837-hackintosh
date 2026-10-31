@@ -1,0 +1,75 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -91,11 +91,15 @@
+ 	OSArray      *fClients;
+ 	uint32_t      fSwapID;
+ 	bool          fConsolePaused;
++	uint8_t       fPending[BCM2837_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
++	bool          fDirty;
++	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
+ 
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	void addClient(IOMobileFramebufferUserClient *client);
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+ 	void swap(const uint8_t *rec);
++	void present(const uint8_t *rec);
+ };
+ 
+ OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
+@@ -156,6 +160,9 @@
+ 		IOLog("BCM2837 FB: no vsync timer\n");
+ 		return false;
+ 	}
++	uint32_t hz = 10;
++	PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
++	fFlushTicks = (hz == 0 || hz >= 60) ? 1 : 60 / hz;
+ 	fVsync->setTimeoutUS(BCM2837_FB_VSYNC_US);
+ 
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+@@ -185,7 +192,20 @@
+ 		    (IOMobileFramebufferUserClient *)fb->fClients->getObject(i);
+ 		client->notify(BCM2837_FB_NOTIFY_VSYNC, values, 6);
+ 	}
++	bool flush = fb->fDirty && (count % fb->fFlushTicks) == 0;
++	uint8_t *rec = NULL;
++	if (flush) {
++		rec = (uint8_t *)IOMallocData(BCM2837_FB_SWAP_REC_SIZE);
++		if (rec != NULL) {
++			memcpy(rec, fb->fPending, BCM2837_FB_SWAP_REC_SIZE);
++			fb->fDirty = false;
++		}
++	}
+ 	IOLockUnlock(fb->fLock);
++	if (rec != NULL) {
++		fb->present(rec);
++		IOFreeData(rec, BCM2837_FB_SWAP_REC_SIZE);
++	}
+ 	sender->setTimeoutUS(BCM2837_FB_VSYNC_US);
+ }
+ 
+@@ -218,10 +238,24 @@
+ 
+ static uint32_t sweet_fb_swaps_logged;
+ 
+-/* Copy each enabled layer's surface into the panel memory (no scaling). */
++/*
++ * A swap only records the frame: copying a whole frame into the panel on every swap (backboardd
++ * presents at 60 Hz) would take the whole CPU. The vsync timer shows the latest frame every
++ * fFlushTicks ticks (boot-arg sweetfb_hz, default 10 Hz).
++ */
+ void
+ AppleCLCD::swap(const uint8_t *rec)
+ {
++	IOLockLock(fLock);
++	memcpy(fPending, rec, BCM2837_FB_SWAP_REC_SIZE);
++	fDirty = true;
++	IOLockUnlock(fLock);
++}
++
++/* Copy each enabled layer's surface into the panel memory (no scaling). */
++void
++AppleCLCD::present(const uint8_t *rec)
++{
+ 	uint32_t mask = get32(rec, 0x104);
+ 
+ 	if (!fConsolePaused) {

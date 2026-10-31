@@ -1,0 +1,540 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -104,6 +104,7 @@
+ bsd/dev/random/randomdev.c		standard
+ 
+ bsd/dev/memdev.c			standard
++bsd/dev/bcm2837_sd.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -766,6 +766,24 @@
+ 		}
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++//
++//	BCM2837: root on the SD card (bsd/dev/bcm2837_sd.c)
++//
++	if (strcmp(rdBootVar, "sdroot0") == 0) {
++		extern int bcm2837_sd_rootdev(dev_t *dev);
++		OSSafeReleaseNULL(matching);
++		int sd_error = bcm2837_sd_rootdev(root);
++		if (sd_error) {
++			panic("IOFindBSDRoot: BCM2837 SD root %s unavailable: %d", rdBootVar, sd_error);
++		}
++		strlcpy(rootName, rdBootVar, rootNameSize);
++		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
++		*oflags = 0;
++		goto iofrootx;
++	}
++#endif
++
+ //
+ //	Now check if we are trying to root on a memory device
+ //
+diff --git a/bsd/dev/bcm2837_sd.c b/bsd/dev/bcm2837_sd.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/bcm2837_sd.c
+@@ -0,0 +1,498 @@
++/*
++ * BCM2837 SD card root device (Raspberry Pi 3).
++ *
++ * The EMMC controller at 0x3f300000 is an SDHCI-compatible Arasan host. This
++ * driver runs it polled with PIO (no interrupts, no DMA, 1-bit bus), brings an
++ * SD/SDHC card from idle to transfer state and exposes the whole card as the
++ * BSD disk sdroot0 (rsdroot0) with 512-byte sectors. Root on it with
++ * rd=sdroot0. Single outstanding request; all access is under one mutex.
++ */
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/buf.h>
++#include <sys/conf.h>
++#include <sys/disk.h>
++#include <sys/errno.h>
++#include <sys/proc.h>
++#include <sys/uio.h>
++#include <miscfs/devfs/devfs.h>
++#include <kern/locks.h>
++#include <kern/clock.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++#include <libkern/libkern.h>
++
++/* osfmk/arm/machine_routines.h, not exported to the BSD layer */
++extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++
++#define EMMC_PHYS       0x3f300000ULL
++#define EMMC_SIZE       0x100
++
++/* SDHCI standard registers (32-bit accesses only: the BCM2835 bus requires it). */
++#define R_ARG2          0x00
++#define R_BLKSIZECNT    0x04    /* [15:0] block size, [31:16] block count */
++#define R_ARG1          0x08
++#define R_CMDTM         0x0c    /* [15:0] transfer mode, [31:16] command */
++#define R_RESP0         0x10
++#define R_DATA          0x20
++#define R_STATUS        0x24
++#define R_CONTROL0      0x28    /* host control, power, block gap, wakeup */
++#define R_CONTROL1      0x2c    /* clock control, timeout, software reset */
++#define R_INTERRUPT     0x30
++#define R_IRPT_MASK     0x34
++#define R_IRPT_EN       0x38
++
++#define ST_CMD_INHIBIT  (1u << 0)
++#define ST_DAT_INHIBIT  (1u << 1)
++
++#define C1_CLK_INTLEN   (1u << 0)
++#define C1_CLK_STABLE   (1u << 1)
++#define C1_CLK_EN       (1u << 2)
++#define C1_RESET_ALL    (1u << 24)
++
++#define INT_CMD_DONE    (1u << 0)
++#define INT_DATA_DONE   (1u << 1)
++#define INT_WRITE_RDY   (1u << 4)
++#define INT_READ_RDY    (1u << 5)
++#define INT_ERROR       (1u << 15)
++
++/* command word: index << 24, then response and data flags in [21:16] */
++#define CMD_RSPNS_NONE  (0u << 16)
++#define CMD_RSPNS_136   (1u << 16)
++#define CMD_RSPNS_48    (2u << 16)
++#define CMD_RSPNS_48B   (3u << 16)
++#define CMD_CRCCHK      (1u << 19)
++#define CMD_IXCHK       (1u << 20)
++#define CMD_ISDATA      (1u << 21)
++#define TM_BLKCNT_EN    (1u << 1)
++#define TM_AUTO_CMD12   (1u << 2)
++#define TM_READ         (1u << 4)
++#define TM_MULTI        (1u << 5)
++
++#define SECSIZE         512u
++#define MAX_BLOCKS      128u            /* per command */
++#define TIMEOUT_NS      (1ull * NSEC_PER_SEC)
++
++static struct {
++	vm_offset_t regs;
++	uint32_t rca;
++	bool sdhc;
++	uint64_t nblocks;
++	int bmajor, cmajor;
++	dev_t bdev;
++	bool ready;
++} sd;
++
++static LCK_GRP_DECLARE(bcm2837_sd_grp, "bcm2837_sd");
++static LCK_MTX_DECLARE(bcm2837_sd_lock, &bcm2837_sd_grp);
++
++static inline uint32_t
++sd_rd(uint32_t off)
++{
++	return *(volatile uint32_t *)(sd.regs + off);
++}
++
++static inline void
++sd_wr(uint32_t off, uint32_t val)
++{
++	*(volatile uint32_t *)(sd.regs + off) = val;
++}
++
++/* Poll until (reg & mask) != 0 (or, with want_clear, == 0). */
++static int
++sd_wait(uint32_t off, uint32_t mask, bool want_clear)
++{
++	uint64_t deadline;
++	nanoseconds_to_absolutetime(TIMEOUT_NS, &deadline);
++	deadline += mach_absolute_time();
++	for (;;) {
++		bool set = (sd_rd(off) & mask) != 0;
++		if (set != want_clear) {
++			return 0;
++		}
++		if (mach_absolute_time() > deadline) {
++			return ETIMEDOUT;
++		}
++		delay(1);
++	}
++}
++
++/* Wait for one of `done` in the interrupt status; fail on an error bit. */
++static int
++sd_wait_int(uint32_t done)
++{
++	uint64_t deadline;
++	nanoseconds_to_absolutetime(TIMEOUT_NS, &deadline);
++	deadline += mach_absolute_time();
++	for (;;) {
++		uint32_t is = sd_rd(R_INTERRUPT);
++		if (is & INT_ERROR) {
++			sd_wr(R_INTERRUPT, is);
++			return EIO;
++		}
++		if (is & done) {
++			return 0;
++		}
++		if (mach_absolute_time() > deadline) {
++			return ETIMEDOUT;
++		}
++		delay(1);
++	}
++}
++
++/* Issue a command; resp[0] gets the first response word. */
++static int
++sd_cmd(uint32_t index, uint32_t flags, uint32_t arg, uint32_t tm, uint32_t *resp)
++{
++	int error = sd_wait(R_STATUS, ST_CMD_INHIBIT | ((flags & CMD_ISDATA) ? ST_DAT_INHIBIT : 0), true);
++	if (error) {
++		return error;
++	}
++	sd_wr(R_INTERRUPT, 0xffffffff);
++	sd_wr(R_ARG1, arg);
++	sd_wr(R_CMDTM, (index << 24) | flags | tm);
++	error = sd_wait_int(INT_CMD_DONE);
++	if (error) {
++		return error;
++	}
++	sd_wr(R_INTERRUPT, INT_CMD_DONE);
++	if (resp) {
++		*resp = sd_rd(R_RESP0);
++	}
++	return 0;
++}
++
++static int
++sd_acmd(uint32_t index, uint32_t flags, uint32_t arg, uint32_t *resp)
++{
++	int error = sd_cmd(55, CMD_RSPNS_48 | CMD_CRCCHK | CMD_IXCHK, sd.rca << 16, 0, NULL);
++	return error ? error : sd_cmd(index, flags, arg, 0, resp);
++}
++
++static int
++sd_set_clock(uint32_t divisor_field)
++{
++	sd_wr(R_CONTROL1, C1_CLK_INTLEN | divisor_field | (0xeu << 16));
++	int error = sd_wait(R_CONTROL1, C1_CLK_STABLE, false);
++	if (error) {
++		return error;
++	}
++	sd_wr(R_CONTROL1, sd_rd(R_CONTROL1) | C1_CLK_EN);
++	return 0;
++}
++
++static int
++sd_card_init(void)
++{
++	uint32_t resp = 0;
++	int error;
++
++	sd_wr(R_CONTROL1, C1_RESET_ALL);
++	if ((error = sd_wait(R_CONTROL1, C1_RESET_ALL, true))) {
++		return error;
++	}
++	sd_wr(R_CONTROL0, 0x0f00);              /* bus power on, 3.3 V (SDHCI hosts that have it) */
++	if ((error = sd_set_clock(0x80u << 8))) {       /* about 400 kHz at the usual base clock */
++		return error;
++	}
++	/* 0x34 is the status ENABLE (bits only latch when set), 0x38 the signal enable: polled, so off */
++	sd_wr(R_IRPT_MASK, 0xffffffff);
++	sd_wr(R_IRPT_EN, 0);
++	delay(2000);
++
++	sd.rca = 0;
++	if ((error = sd_cmd(0, CMD_RSPNS_NONE, 0, 0, NULL))) {
++		return error;
++	}
++	/* CMD8: voltage check. Cards that do not answer are SD 1.x (no SDHC). */
++	bool v2 = (sd_cmd(8, CMD_RSPNS_48 | CMD_CRCCHK | CMD_IXCHK, 0x1aa, 0, &resp) == 0) && (resp & 0xfff) == 0x1aa;
++	if (!v2) {
++		sd_wr(R_INTERRUPT, 0xffffffff);
++	}
++	uint32_t ocr = 0;
++	for (int i = 0; i < 1000; i++) {
++		error = sd_acmd(41, CMD_RSPNS_48, 0x00ff8000 | (v2 ? 0x40000000 : 0), &ocr);
++		if (error) {
++			return error;
++		}
++		if (ocr & 0x80000000) {
++			break;
++		}
++		delay(1000);
++		if (i == 999) {
++			return ETIMEDOUT;
++		}
++	}
++	sd.sdhc = (ocr & 0x40000000) != 0;
++	if ((error = sd_cmd(2, CMD_RSPNS_136 | CMD_CRCCHK, 0, 0, NULL))) {
++		return error;
++	}
++	if ((error = sd_cmd(3, CMD_RSPNS_48 | CMD_CRCCHK | CMD_IXCHK, 0, 0, &resp))) {
++		return error;
++	}
++	sd.rca = resp >> 16;
++	/* CSD: capacity (version 2.0: C_SIZE; version 1.0: C_SIZE, C_SIZE_MULT, READ_BL_LEN) */
++	if ((error = sd_cmd(9, CMD_RSPNS_136 | CMD_CRCCHK, sd.rca << 16, 0, NULL))) {
++		return error;
++	}
++	/*
++	 * SDHCI hosts strip the CRC from a 136-bit response: CSD bit n is bit n - 8 of
++	 * {RESP3, RESP2, RESP1, RESP0}.
++	 */
++	uint32_t r1 = sd_rd(R_RESP0 + 4), r2 = sd_rd(R_RESP0 + 8), r3 = sd_rd(R_RESP0 + 12);
++	if (((r3 >> 22) & 3) == 1) {
++		/* CSD v2.0: C_SIZE is CSD[69:48], capacity (C_SIZE + 1) * 512 KiB */
++		uint32_t csize = (r1 >> 8) & 0x3fffff;
++		sd.nblocks = ((uint64_t)csize + 1) * 1024;
++	} else {
++		/* CSD v1.0: C_SIZE CSD[73:62], C_SIZE_MULT CSD[49:47], READ_BL_LEN CSD[83:80] */
++		uint32_t csize = ((r2 & 3) << 10) | (r1 >> 22);
++		uint32_t mult = (r1 >> 7) & 7;
++		uint32_t bl_len = (r2 >> 8) & 0xf;
++		sd.nblocks = (((uint64_t)csize + 1) << (mult + 2)) << bl_len >> 9;
++	}
++	if ((error = sd_cmd(7, CMD_RSPNS_48B | CMD_CRCCHK | CMD_IXCHK, sd.rca << 16, 0, NULL))) {
++		return error;
++	}
++	if (!sd.sdhc) {
++		/* SDSC cards address bytes; force 512-byte blocks. */
++		if ((error = sd_cmd(16, CMD_RSPNS_48 | CMD_CRCCHK | CMD_IXCHK, SECSIZE, 0, NULL))) {
++			return error;
++		}
++	}
++	return sd_set_clock(0x02u << 8);        /* faster once the card is selected */
++}
++
++/* Transfer `n` sectors starting at `lba` between the card and `buf`. */
++static int
++sd_xfer(uint64_t lba, uint32_t n, uint8_t *buf, bool write)
++{
++	uint32_t arg = sd.sdhc ? (uint32_t)lba : (uint32_t)(lba * SECSIZE);
++	uint32_t tm = TM_BLKCNT_EN | (write ? 0 : TM_READ) | (n > 1 ? (TM_MULTI | TM_AUTO_CMD12) : 0);
++	uint32_t index = write ? (n > 1 ? 25 : 24) : (n > 1 ? 18 : 17);
++	int error;
++
++	sd_wr(R_BLKSIZECNT, (n << 16) | SECSIZE);
++	if ((error = sd_cmd(index, CMD_RSPNS_48 | CMD_CRCCHK | CMD_IXCHK | CMD_ISDATA, arg, tm, NULL))) {
++		return error;
++	}
++	for (uint32_t b = 0; b < n; b++) {
++		if ((error = sd_wait_int(write ? INT_WRITE_RDY : INT_READ_RDY))) {
++			return error;
++		}
++		sd_wr(R_INTERRUPT, write ? INT_WRITE_RDY : INT_READ_RDY);
++		for (uint32_t w = 0; w < SECSIZE / 4; w++) {
++			uint32_t v;
++			uint8_t *p = buf + (uint64_t)b * SECSIZE + w * 4;
++			if (write) {
++				memcpy(&v, p, 4);
++				sd_wr(R_DATA, v);
++			} else {
++				v = sd_rd(R_DATA);
++				memcpy(p, &v, 4);
++			}
++		}
++	}
++	if ((error = sd_wait_int(INT_DATA_DONE))) {
++		return error;
++	}
++	sd_wr(R_INTERRUPT, INT_DATA_DONE);
++	return 0;
++}
++
++static int
++bcm2837_sd_open(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
++{
++	return sd.ready ? 0 : ENXIO;
++}
++
++static int
++bcm2837_sd_close(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
++{
++	return 0;
++}
++
++static void
++bcm2837_sd_strategy(buf_t bp)
++{
++	int error = 0;
++	caddr_t vaddr = NULL;
++	uint64_t off = (uint64_t)buf_blkno(bp) * SECSIZE;
++	uint32_t count = buf_count(bp);
++	bool write = !(buf_flags(bp) & B_READ);
++	uint64_t bytes = sd.nblocks * SECSIZE;
++
++	buf_setresid(bp, count);
++	if (off > bytes || count > bytes - off || (count % SECSIZE)) {
++		error = EINVAL;
++		goto done;
++	}
++	if (count == 0) {
++		goto done;
++	}
++	if (buf_map(bp, &vaddr)) {
++		error = EIO;
++		goto done;
++	}
++	lck_mtx_lock(&bcm2837_sd_lock);
++	for (uint32_t done = 0; done < count;) {
++		uint32_t n = MIN((count - done) / SECSIZE, MAX_BLOCKS);
++		error = sd_xfer(off / SECSIZE + done / SECSIZE, n, (uint8_t *)vaddr + done, write);
++		if (error) {
++			break;
++		}
++		done += n * SECSIZE;
++		buf_setresid(bp, count - done);
++	}
++	lck_mtx_unlock(&bcm2837_sd_lock);
++	buf_unmap(bp);
++done:
++	if (error) {
++		buf_seterror(bp, error);
++	}
++	buf_biodone(bp);
++}
++
++static int
++bcm2837_sd_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag,
++    __unused struct proc *p, int is_char)
++{
++	uint32_t *f = (uint32_t *)data;
++	uint64_t *o = (uint64_t *)data;
++
++	switch (cmd) {
++	case DKIOCGETBLOCKSIZE:
++	case DKIOCGETPHYSICALBLOCKSIZE:
++		*f = SECSIZE;
++		return 0;
++	case DKIOCSETBLOCKSIZE:
++		return is_char ? ENODEV : (*f == SECSIZE ? 0 : EINVAL);
++	case DKIOCGETBLOCKCOUNT:
++		*o = sd.nblocks;
++		return 0;
++	case DKIOCSYNCHRONIZE:
++	case DKIOCSYNCHRONIZECACHE:
++		/* The card has no write cache we manage: strategy returns after the data is written. */
++		return 0;
++	case DKIOCISWRITABLE:
++		*f = 1;
++		return 0;
++	case DKIOCGETMAXBLOCKCOUNTREAD:
++	case DKIOCGETMAXBLOCKCOUNTWRITE:
++		*o = MAX_BLOCKS;
++		return 0;
++	case DKIOCGETMAXSEGMENTCOUNTREAD:
++	case DKIOCGETMAXSEGMENTCOUNTWRITE:
++		*o = 1;
++		return 0;
++	default:
++		return ENOTTY;
++	}
++}
++
++static int
++bcm2837_sd_bioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
++{
++	return bcm2837_sd_ioctl(dev, cmd, data, flag, p, 0);
++}
++
++static int
++bcm2837_sd_cioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
++{
++	return bcm2837_sd_ioctl(dev, cmd, data, flag, p, 1);
++}
++
++static int
++bcm2837_sd_psize(__unused dev_t dev)
++{
++	return sd.ready ? (int)MIN(sd.nblocks, INT_MAX) : -1;
++}
++
++static int
++bcm2837_sd_read(dev_t dev, struct uio *uio, __unused int ioflag)
++{
++	return physio(bcm2837_sd_strategy, NULL, dev, B_READ, minphys, uio, (int)SECSIZE);
++}
++
++static int
++bcm2837_sd_write(dev_t dev, struct uio *uio, __unused int ioflag)
++{
++	return physio(bcm2837_sd_strategy, NULL, dev, B_WRITE, minphys, uio, (int)SECSIZE);
++}
++
++static const struct bdevsw bcm2837_sd_bdevsw = {
++	.d_open     = bcm2837_sd_open,
++	.d_close    = bcm2837_sd_close,
++	.d_strategy = bcm2837_sd_strategy,
++	.d_ioctl    = bcm2837_sd_bioctl,
++	.d_dump     = eno_dump,
++	.d_psize    = bcm2837_sd_psize,
++	.d_type     = D_DISK,
++};
++
++static const struct cdevsw bcm2837_sd_cdevsw = {
++	.d_open       = bcm2837_sd_open,
++	.d_close      = bcm2837_sd_close,
++	.d_read       = bcm2837_sd_read,
++	.d_write      = bcm2837_sd_write,
++	.d_ioctl      = bcm2837_sd_cioctl,
++	.d_stop       = eno_stop,
++	.d_reset      = eno_reset,
++	.d_ttys       = NULL,
++	.d_select     = eno_select,
++	.d_mmap       = eno_mmap,
++	.d_strategy   = eno_strat,
++	.d_reserved_1 = eno_getc,
++	.d_reserved_2 = eno_putc,
++	.d_type       = D_DISK,
++};
++
++static int
++bcm2837_sd_init(void)
++{
++	int error;
++
++	sd.regs = ml_io_map(EMMC_PHYS, EMMC_SIZE);
++	if (!sd.regs) {
++		return ENOMEM;
++	}
++	lck_mtx_lock(&bcm2837_sd_lock);
++	error = sd_card_init();
++	lck_mtx_unlock(&bcm2837_sd_lock);
++	if (error) {
++		printf("BCM2837 SD: card init failed: %d\n", error);
++		return error;
++	}
++	sd.bmajor = bdevsw_add(-1, &bcm2837_sd_bdevsw);
++	if (sd.bmajor < 0) {
++		return ENXIO;
++	}
++	sd.cmajor = cdevsw_add_with_bdev(-1, &bcm2837_sd_cdevsw, sd.bmajor);
++	if (sd.cmajor < 0) {
++		return ENXIO;
++	}
++	sd.bdev = makedev(sd.bmajor, 0);
++	devfs_make_node(sd.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "sdroot0");
++	devfs_make_node(makedev(sd.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rsdroot0");
++	sd.ready = true;
++	printf("BCM2837 SD: %s card, %llu MiB\n", sd.sdhc ? "SDHC" : "SDSC", sd.nblocks * SECSIZE >> 20);
++	return 0;
++}
++
++/* Root device for rd=sdroot0 (IOFindBSDRoot). */
++int bcm2837_sd_rootdev(dev_t *dev);
++
++int
++bcm2837_sd_rootdev(dev_t *dev)
++{
++	if (!sd.ready) {
++		int error = bcm2837_sd_init();
++		if (error) {
++			return error;
++		}
++	}
++	*dev = sd.bdev;
++	return 0;
++}
++#endif /* ARM64_BOARD_CONFIG_BCM2837 */
