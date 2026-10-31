@@ -212,7 +212,13 @@ image (do it before the first boot: LaunchServices registers apps on that boot, 
 rescans). On such a cold first boot (about 31 minutes to the lock screen on QEMU, then unlocking needed several
 tries over the next 50 minutes) the home screen shows FaceTime, Calendar, Mail, Notes, Reminders, Clock, News, TV,
 Podcasts, Maps, Health, Wallet and Music next to Photos, App Store, Settings, Phone, Safari and Messages; the two
-default widgets still read "Waiting..." and the Weather icon is not on that page, not investigated yet.
+default widgets still read "Waiting...". The Weather, Stocks, Find My, Home, Books, ... icons are there, on the
+second page of the layout. The widgets stay empty because chronod finds no widget extension: its
+`chrono.sql` has 0 rows in `ExtensionMetadata` and `Descriptors` (only 2 `WidgetConfigs`), although the
+`.appex` bundles (e.g. `Weather.app/PlugIns/WeatherWidget.appex`) are in `/Applications`; pkd, lsd, chronod and
+runningboardd are all idle in their run loops. Open: why PlugInKit/LaunchServices hands chronod nothing. Each
+boot of this image needs about an hour on QEMU before unlocking works (LaunchServices registers the apps again,
+no LaunchServices store is persisted in the guest's containers), so experiments here are slow.
 
 Red text: kernel tracing (patch 0072) shows the lock-screen clock is already red in backboardd's final composite
 surface (text pixels `B 38..84, G = B, R 255`, G and B growing over time), so the kernel's copy to the panel is
