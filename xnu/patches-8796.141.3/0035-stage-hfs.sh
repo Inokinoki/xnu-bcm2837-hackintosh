@@ -47,6 +47,16 @@ text = text.replace(include, '#if CONFIG_PROTECT\n' + include + '#endif\n')
 i, j = text.index(first), text.index(end)
 text = text[:i] + '#if CONFIG_PROTECT\n' + text[i:j].rstrip('\n') + '\n#endif\n\n' + text[j:]
 path.write_text(text)
+
+# kext-config.h picks the iOS feature set (CONFIG_PROTECT, no quota/named streams) when the SDK's
+# TargetConditionals.h says TARGET_OS_IPHONE, which an iPhoneOS-platform kernel build does. BCM2837 always
+# wants the OS X set (no AppleKeyStore), whatever platform the kernel is built for.
+path = target / 'core' / 'kext-config.h'
+text = path.read_text()
+ios = '#if (TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR) // iOS (real hardware)'
+if text.count(ios) != 1:
+    raise SystemExit(f'HFS source changed: {path}')
+path.write_text(text.replace(ios, '#if 0 // BCM2837: always the OS X feature set'))
 PY
 
 # Kernel builds use -nostdinc; HFS's kext-config.h needs the SDK's target macros.
