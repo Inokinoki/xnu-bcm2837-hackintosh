@@ -44,7 +44,7 @@ def parse_macho(buf):
     return dict(cputype=cputype, segs=segs, entry=entry)
 
 
-def build(kernel_path, cmdline, ramdisk_path=None, fb=None, ios_dt=None):
+def build(kernel_path, cmdline, ramdisk_path=None, fb=None, ios_dt=None, device_name=None):
     buf = bytearray(open(kernel_path, 'rb').read())
     m = parse_macho(buf)
     segs = [s for s in m['segs'] if s['vmsize']]
@@ -77,7 +77,7 @@ def build(kernel_path, cmdline, ramdisk_path=None, fb=None, ios_dt=None):
         w, h = (int(v) for v in fb.lower().split('x'))
         display = (w, h)
         cmdline = (cmdline + f' fb={w}x{h}').strip()
-    adt_blob = pi_adt.build(PHYS_BASE, MEM_SIZE, cmdline, ramdisk, display, ios_dt)
+    adt_blob = pi_adt.build(PHYS_BASE, MEM_SIZE, cmdline, ramdisk, display, ios_dt, device_name)
 
     hdr_size = SEG_TABLE + 32 * len(pieces)
     out = bytearray(hdr_size)
@@ -110,10 +110,11 @@ if __name__ == '__main__':
     ap.add_argument('out')
     ap.add_argument('--ramdisk', help='image placed in RAM, boot with rd=md0')
     ap.add_argument('--fb', help='WxH: framebuffer from the VideoCore (loader), ADT /arm-io/disp0')
+    ap.add_argument('--device-name', help='overrides /product product-name and product-description (e.g. "Raspberry Pi 3B"), needs --ios-dt')
     ap.add_argument('--ios-dt', help='raw iPhone X (D22AP) device tree: iPhone10,3 identity and /product (Apple artifact, not in git)')
     ap.add_argument('--cmdline', default='debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress')
     a = ap.parse_args()
-    blob, info = build(a.kernel, a.cmdline, a.ramdisk, a.fb, a.ios_dt)
+    blob, info = build(a.kernel, a.cmdline, a.ramdisk, a.fb, a.ios_dt, a.device_name)
     open(a.out, 'wb').write(blob)
     for k, v in info.items():
         if k != 'segs':

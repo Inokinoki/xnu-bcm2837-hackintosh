@@ -40,6 +40,8 @@ fi
 [ -n "${FB:-}" ] && set -- "$@" --fb "$FB"
 # IOS_DT=d22ap.adt: look like the iPhone X (see tools/im4p-extract.py for getting that device tree).
 [ -n "${IOS_DT:-}" ] && set -- "$@" --ios-dt "$IOS_DT"
+# DEVICE_NAME="Raspberry Pi 3B": /product product-name and product-description (what Settings may show)
+[ -n "${DEVICE_NAME:-}" ] && set -- "$@" --device-name "$DEVICE_NAME"
 python3 "$HERE/tools/mkpi_payload.py" "$@"
 
 # 3. run; QEMU's generic loader puts the payload at 0x3c000000

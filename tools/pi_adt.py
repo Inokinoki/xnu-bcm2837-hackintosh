@@ -49,7 +49,7 @@ def serialize(node):
     return bytes(out)
 
 
-def build(dram_base, dram_size, cmdline='', ramdisk=None, display=None, ios_dt=None):
+def build(dram_base, dram_size, cmdline='', ramdisk=None, display=None, ios_dt=None, device_name=None):
     """Return the ADT blob for a Pi 3 with RAM at [dram_base, dram_base + dram_size).
 
     ramdisk=(phys, size) adds /chosen/memory-map RAMDisk (two uintptr_t) for
@@ -163,6 +163,8 @@ def build(dram_base, dram_size, cmdline='', ramdisk=None, display=None, ios_dt=N
                 product.prop('name', 'product')
                 for k, f, v in c.props:
                     if not f and k not in ('name', 'AAPL,phandle'):
+                        if device_name and k in ('product-name', 'product-description'):
+                            v = device_name.encode() + b'\0'
                         product.props.append((k, 0, v))
                 break
         else:
