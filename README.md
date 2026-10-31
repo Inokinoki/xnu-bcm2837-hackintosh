@@ -178,4 +178,6 @@ retagged as iOS with `vtool`; the iPhoneOS install puts the kernel at the root o
 (0007, 0014, 0019, 0060, 0063, 0070) already build for both. What the iOS platform needed so far:
 `1001` (the iOS `mac_policy_list` is read-only-late, our built-in policies register later), 0070 capped at
 the platform's `MACH_VM_MAX_ADDRESS` (64 GB), and `sleep-disabled` in the ADT `/defaults` (the iOS
-IOPMrootDomain suspends when idle and `BCM2837CPU::haltCPU` panics). Status: boots to userland on QEMU.
+IOPMrootDomain suspends when idle and `BCM2837CPU::haltCPU` panics). Status: with those, the iOS-platform
+kernel (`cpus=4`, QEMU) unlocks to the home screen and opens Settings > General > About for 43 minutes without a
+panic, showing `Raspberry Pi 3B`; Safari has not been run on it yet.
