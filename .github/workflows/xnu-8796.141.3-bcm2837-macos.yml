@@ -36,9 +36,9 @@ env:
 
 jobs:
   build:
-    # macos-14 ships Xcode 15.x, whose iig matches the xnu-8796.141.3 IORPC ABI
-    # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks).
-    runs-on: macos-14
+    # macos-14 (Xcode 15/16.2) is retired on 2026-11-02. macos-15 has Xcode 16.x and 26.x; Xcode 16.4's iig
+    # emits IORPC.kernelContent, which patch 0071 adds to this xnu.
+    runs-on: macos-15
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +74,7 @@ jobs:
           sudo chmod +x /usr/local/bin/xcodes
           sw_vers
           ls -d /Applications/Xcode*.app
-          XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          XC=/Applications/Xcode_16.4.app
           echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
           sudo xcode-select -s "$XC"
           xcodebuild -version
