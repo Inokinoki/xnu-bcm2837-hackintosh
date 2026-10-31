@@ -95,7 +95,7 @@ CoreAnimation, backboardd, our built-in IOSurface/IOMobileFramebuffer (`AppleCLC
 the loader allocates (`FB=1125x2436 IOS_DT=d22ap.adt`, see `tools/pi3-qemu-boot.sh`; the iPhone X device tree is an
 Apple artifact: `tools/im4p-extract.py`). It takes about 50 minutes of QEMU TCG time on a single core to get there
 the first time (LaunchServices builds its database; use a qcow2 overlay, `SDFORMAT=qcow2`, to keep the state).
-Not done: other apps (only Settings was tried),  a real AppleMobileFileIntegrity, networking,
+Not done: other apps (Safari and Settings work),  a real AppleMobileFileIntegrity, networking,
 more than one CPU on real hardware, and any test on real hardware.
 
 Bring-up notes that cost time: QEMU's generic counter runs at 62.5 MHz (the loader now measures it and patches
@@ -122,6 +122,17 @@ That needed patch 0068: the kernel sized the vnode table at 1024 (`sane_size` is
 `bsd/dev/unix_startup.c` computes it) and userland hit `vnode: table is full`; there is now a floor of 32768.
 Restoring a `savevm` snapshot keeps the guest running, but QEMU's display stays at a blank 640x480 afterwards,
 so use snapshots for sending input and a normal boot for screenshots.
+
+Safari opens too (start page with Favorites, Privacy Report and the address bar; WebKit.WebContent and the
+other WebKit processes run), and Settings > General > About shows Name iPhone, iOS Version 16.7.16, Model Name
+iPhone X, Model Number and Serial Number N/A, Capacity 17 GB (the root volume), Wi-Fi Address N/A. Two more
+kernel patches were needed for Safari: 0069 (a development-kernel stackshot consistency panic, "thread wait
+info count mismatch", hit after about 24 minutes) and 0070 (the macOS-platform default of a 47-bit user address
+space is larger than what a 4K-page user pmap covers, 64 - T0SZ_BOOT = 38 bits here, so WebContent got addresses
+that `pmap_remove_options` rejected). Practical notes for driving the guest on QEMU: unlocking can take several
+tries (power key, tap, swipe up); a first-run Siri sheet may appear and only the home key dismisses it; the
+status bar clock and lock screen only redraw when something wakes them. The blur materials (dock, lock screen
+text) sometimes render red; not investigated yet.
 QEMU snapshots (`savevm`, `LOADVM=`) work on raspi3b and help repeat gesture tests.
 
 Screenshot gotcha: QEMU's `screendump` pads PPM rows to 4 bytes (3376 instead of 3375 for a 1125 pixel wide
