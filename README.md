@@ -83,7 +83,7 @@ CMDLINE="debug=0xc serial=3 cpus=1 keepsyms=1 kt_fixed_zones=120 -noprogress rd=
 SDSNAPSHOT=1 SDIMG=ios16-root.img tools/pi3-qemu-boot.sh KERNEL 300
 ```
 
-`unentitled_ios_sim_launch=1` lets the macOS-configured kernel run iOS binaries; `ignition_level=1` makes
+`unentitled_ios_sim_launch=1` lets the macOS-platform kernel run iOS binaries (the iOS-platform runs also passed it; whether it is still needed there was not tested); `ignition_level=1` makes
 dyld use `/System/Library/Caches/com.apple.dyld` (the image has hard links there); add
 `launchd_unsecure_cache=1` (a number, not a path) so `launchd_cache_loader` accepts the unsigned launchd.plist
 and skips the AMFI lookup. The image carries `tools/ios-root-tweaks.py`'s changes (`_PanicOnCrash` renamed).
@@ -167,17 +167,26 @@ The helper replays the guest's HFS+ journal with fsck, clears the journaled flag
 only without a journal) and edits a qcow2 overlay through qemu-nbd in docker; the base image is untouched.
 Checked on QEMU: both rows read `Raspberry Pi 3B`.
 
-## iOS-platform kernel (work in progress)
+## Kernel platforms: iOS (default) and macOS
 
-The kernel above is built as a macOS platform (`SDKROOT=macosx`) and runs the iOS userland. The workflow
-`.github/workflows/xnu-8796.141.3-bcm2837-ios.yml` builds the same sources for the iPhoneOS platform
-(`SDKROOT=iphoneos`, `XNU_TARGET_OS_IOS`) from `xnu/patches-8796.141.3/` plus the iOS-only
-`xnu/patches-ios-8796.141.3/`. Build notes: `libfirehose_kernel` stays on the macosx SDK and its objects are
-retagged as iOS with `vtool`; the iPhoneOS install puts the kernel at the root of the fakeroot as `mach.*`
-(the workflow copies it to `kernel.development.bcm2837`). The patches that gate on the platform
-(0007, 0014, 0019, 0060, 0063, 0070) already build for both. What the iOS platform needed so far:
-`1001` (the iOS `mac_policy_list` is read-only-late, our built-in policies register later), 0070 capped at
-the platform's `MACH_VM_MAX_ADDRESS` (64 GB), and `sleep-disabled` in the ADT `/defaults` (the iOS
-IOPMrootDomain suspends when idle and `BCM2837CPU::haltCPU` panics). Status: with those, the iOS-platform
-kernel (`cpus=4`, QEMU) unlocks to the home screen and opens Settings > General > About for 43 minutes without a
-panic, showing `Raspberry Pi 3B`, and Safari opens on it too (start page, about 7 minutes after the tap).
+The default kernel is built for the iPhoneOS platform (`SDKROOT=iphoneos`, `XNU_TARGET_OS_IOS`), because the
+target is the iOS 16 userland. The macOS-platform build (`SDKROOT=macosx`) is kept as an alternative.
+
+| | workflow | patches | artifact |
+|---|---|---|---|
+| iOS platform (default) | `.github/workflows/xnu-8796.141.3-bcm2837.yml` | `xnu/patches-8796.141.3/` + `xnu/patches-ios-8796.141.3/` | `xnu-8796.141.3-bcm2837-kernel` |
+| macOS platform | `.github/workflows/xnu-8796.141.3-bcm2837-macos.yml` | `xnu/patches-8796.141.3/` only | `xnu-8796.141.3-bcm2837-macos-kernel` |
+
+Both put `kernel.development.bcm2837` in the artifact. Name iOS-only patches `10NN-ios-*.patch` so they apply
+after the shared ones. Build notes for the iOS platform: `libfirehose_kernel` stays on the macosx SDK and its
+objects are retagged as iOS with `vtool`; the iPhoneOS install puts the kernel at the root of the fakeroot as
+`mach.*` (the workflow copies it to `kernel.development.bcm2837`). The shared patches that gate on the platform
+(0007, 0014, 0019, 0060, 0063, 0070) build for both. What the iOS platform needed beyond them: `1001` (the iOS
+`mac_policy_list` is read-only-late, our built-in policies register later), 0070 capped at the platform's
+`MACH_VM_MAX_ADDRESS` (64 GB), and `sleep-disabled` in the ADT `/defaults` (the iOS IOPMrootDomain suspends when
+idle and `BCM2837CPU::haltCPU` panics).
+
+Status on QEMU (`cpus=4`): the iOS-platform kernel unlocks to the home screen, opens Settings > General > About
+(showing `Raspberry Pi 3B`) and Safari (start page), about 43 minutes without a panic. Not done: idle and
+low-memory (jetsam) behaviour, real hardware. The runner `macos-14` is retired on 2026-11-02; `macos-15` only
+ships Xcode 16, whose `iig` output this xnu does not accept, so the workflows need a different Xcode source.
