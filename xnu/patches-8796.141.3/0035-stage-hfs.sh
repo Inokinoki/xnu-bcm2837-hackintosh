@@ -62,4 +62,26 @@ PY
 # Kernel builds use -nostdinc; HFS's kext-config.h needs the SDK's target macros.
 hfs_sdk=$(xcrun --sdk macosx --show-sdk-path)
 cp "$hfs_sdk/usr/include/TargetConditionals.h" bsd/sweet_hfs/
+# An iPhoneOS-platform kernel build makes the SDK header say TARGET_OS_IPHONE (HFS then drops its
+# encodings, quota, named streams, ...); BCM2837 always wants the OS X view of HFS.
+cat >> bsd/sweet_hfs/TargetConditionals.h <<'EOF'
+
+/* BCM2837: HFS is always built with the OS X feature set, whatever platform the kernel targets. */
+#undef TARGET_OS_OSX
+#undef TARGET_OS_MAC
+#undef TARGET_OS_IPHONE
+#undef TARGET_OS_IOS
+#undef TARGET_OS_SIMULATOR
+#undef TARGET_OS_EMBEDDED
+#undef TARGET_OS_MACCATALYST
+#undef TARGET_IPHONE_SIMULATOR
+#define TARGET_OS_OSX 1
+#define TARGET_OS_MAC 1
+#define TARGET_OS_IPHONE 0
+#define TARGET_OS_IOS 0
+#define TARGET_OS_SIMULATOR 0
+#define TARGET_OS_EMBEDDED 0
+#define TARGET_OS_MACCATALYST 0
+#define TARGET_IPHONE_SIMULATOR 0
+EOF
 echo "Staged hfs-627.100.6 ($hfs_sha) for BCM2837"
