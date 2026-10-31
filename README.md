@@ -205,5 +205,18 @@ in a new qcow2 overlay; the home screen is then just the icons. `tools/ios-root-
 launchd job, e.g. `com.apple.chronod`) is the helper used to rule chronod out. Getting real widgets would need
 the missing apps added to the root image.
 
-Open item: the lock-screen text / dock material sometimes renders red (R near 255 with G = B varying over time;
-suspected luminance-alpha `LA08` intermediate surfaces, not confirmed).
+The removable system apps (Weather, Calendar, Maps, Notes, ... 32 of them) are in the image, staged in
+`/private/var/staged_system_apps`; a device installs them at first boot and nothing does here.
+`tools/ios-root-install-apps.sh BASE NEW.qcow2` copies them into `/Applications` in an overlay of the pristine
+image (do it before the first boot: LaunchServices registers apps on that boot, an already-booted overlay never
+rescans). On such a cold first boot (about 31 minutes to the lock screen on QEMU, then unlocking needed several
+tries over the next 50 minutes) the home screen shows FaceTime, Calendar, Mail, Notes, Reminders, Clock, News, TV,
+Podcasts, Maps, Health, Wallet and Music next to Photos, App Store, Settings, Phone, Safari and Messages; the two
+default widgets still read "Waiting..." and the Weather icon is not on that page, not investigated yet.
+
+Red text: kernel tracing (patch 0072) shows the lock-screen clock is already red in backboardd's final composite
+surface (text pixels `B 38..84, G = B, R 255`, G and B growing over time), so the kernel's copy to the panel is
+faithful; the colour comes from CoreAnimation's compositing in userland. SpringBoard's `LA08` (luminance + alpha)
+text masks hold L = 0 and the coverage in A. The dock is grey/white on the app-enabled boot. Not fixed; next
+experiments: make `LA08` surface creation fail so CoreAnimation picks another format, or give the lock screen a
+real wallpaper (PosterBoard currently has none).

@@ -9,9 +9,16 @@ root, name = sys.argv[1], sys.argv[2]
 host = re.sub(r'[^A-Za-z0-9-]+', '-', name).strip('-')
 
 p = os.path.join(root, 'private/var/preferences/SystemConfiguration/preferences.plist')
-raw = open(p, 'rb').read()
-fmt = plistlib.FMT_BINARY if raw[:6] == b'bplist' else plistlib.FMT_XML
-d = plistlib.loads(raw)
+if os.path.exists(p):
+    raw = open(p, 'rb').read()
+    fmt = plistlib.FMT_BINARY if raw[:6] == b'bplist' else plistlib.FMT_XML
+    d = plistlib.loads(raw)
+else:
+    # a root that has not booted yet: configd has not written it, same layout as after a boot
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    fmt = plistlib.FMT_BINARY
+    d = {'__VERSION__': 20191120,
+         'System': {'Network': {'HostNames': {}}, 'System': {'ComputerNameEncoding': 134217984}}}
 d['System']['System']['ComputerName'] = name
 d['System']['System']['HostName'] = host
 d['System']['Network']['HostNames']['LocalHostName'] = host
