@@ -78,8 +78,8 @@ jobs:
           assert s.count(old) == 3, s.count(old)
           s = s.replace(old, 'SDKROOT=iphoneos TARGET_CONFIGS=')
           # libfirehose_kernel is still built with the macosx SDK (the iphoneos SDK build cannot find
-          # Availability.h), but the iOS kernel links it: retag its objects as iOS right after it is built.
-          marker = 'xcodebuild install -target libfirehose_kernel -sdk macosx '
+          # Availability.h), but the iOS kernel links it: retag its objects as iOS right after build.sh renames it into place.
+          marker = 'mv "${FAKEROOT_DIR}/usr/local/lib/kernel/liblibfirehose_kernel.a" '
           assert s.count(marker) == 1, s.count(marker)
           i = s.index(marker)
           j = s.index('\n', i)
