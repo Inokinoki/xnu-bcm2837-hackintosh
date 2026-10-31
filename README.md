@@ -149,3 +149,33 @@ shows the framebuffer itself is exact: address, pitch, channel order, centre, al
 sends an event. IPIs use the BCM2836 local mailbox 0 (IRQ); timers stay FIQ; peripheral interrupts
 stay on core 0 (the Pi 3 has no GIC). Checked on QEMU raspi3b with the tiny init at `cpus=2` and
 `cpus=4`; the iOS 16 root reaches the lock screen at `cpus=4` (warm qcow2 overlay): about 11 min of wall time, while `cpus=1` from the same overlay had not reached it after 25 min (a lower bound of 2.2x; QEMU TCG runs the four cores on host threads, so real hardware will differ).
+
+## Device name in Settings
+
+Settings > General > About shows `Name` and `Model Name`. `Name` is the ComputerName in the root's
+`preferences.plist`; `Model Name` comes from MobileGestalt, which caches its answers in
+`/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist`
+(built from the device tree's `/product` `product-name` / `product-description`, the cache keeps the old
+value until it is deleted). To show `Raspberry Pi 3B` in both:
+
+```sh
+tools/ios-root-set-name.sh BASE.qcow2 NAMED.qcow2 "Raspberry Pi 3B"   # new overlay: ComputerName, drops the MG cache
+DEVICE_NAME="Raspberry Pi 3B" IOS_DT=d22ap.adt SDIMG=NAMED.qcow2 SDFORMAT=qcow2 ... tools/pi3-qemu-boot.sh KERNEL
+```
+
+The helper replays the guest's HFS+ journal with fsck, clears the journaled flag (Linux mounts HFS+ read-write
+only without a journal) and edits a qcow2 overlay through qemu-nbd in docker; the base image is untouched.
+Checked on QEMU: both rows read `Raspberry Pi 3B`.
+
+## iOS-platform kernel (work in progress)
+
+The kernel above is built as a macOS platform (`SDKROOT=macosx`) and runs the iOS userland. The workflow
+`.github/workflows/xnu-8796.141.3-bcm2837-ios.yml` builds the same sources for the iPhoneOS platform
+(`SDKROOT=iphoneos`, `XNU_TARGET_OS_IOS`) from `xnu/patches-8796.141.3/` plus the iOS-only
+`xnu/patches-ios-8796.141.3/`. Build notes: `libfirehose_kernel` stays on the macosx SDK and its objects are
+retagged as iOS with `vtool`; the iPhoneOS install puts the kernel at the root of the fakeroot as `mach.*`
+(the workflow copies it to `kernel.development.bcm2837`). The patches that gate on the platform
+(0007, 0014, 0019, 0060, 0063, 0070) already build for both. What the iOS platform needed so far:
+`1001` (the iOS `mac_policy_list` is read-only-late, our built-in policies register later), 0070 capped at
+the platform's `MACH_VM_MAX_ADDRESS` (64 GB), and `sleep-disabled` in the ADT `/defaults` (the iOS
+IOPMrootDomain suspends when idle and `BCM2837CPU::haltCPU` panics). Status: boots to userland on QEMU.
