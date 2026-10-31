@@ -99,6 +99,8 @@ def build(dram_base, dram_size, cmdline='', ramdisk=None, display=None, ios_dt=N
     defaults.prop('name', 'defaults')
     # No effaceable storage: keybagd reads /private/var/keybags/systembag.kb as a plain plist.
     defaults.prop('no-effaceable-storage', struct.pack('<I', 1))
+    # the iOS platform's IOPMrootDomain sleeps the system when idle and the CPU driver cannot suspend
+    defaults.prop('sleep-disabled', struct.pack('<I', 1))
 
     # pe_arm_get_soc_base_phys(): the SoC base is ranges[1] of arm-io (the parent
     # address). Zero there disables the platform setup, including the timebase.
