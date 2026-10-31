@@ -17,6 +17,12 @@ on:
       keep_going:
         description: make -k (collect all compile errors in one run)
         default: "true"
+      runner:
+        description: runner label (macos-14 is retired on 2026-11-02)
+        default: macos-14
+      xcode:
+        description: Xcode to select, e.g. 16.4 (default - the newest installed)
+        default: ""
   push:
     branches: [master, xnu-8796-bcm2837, rootfs-ramdisk]
     paths:
@@ -39,7 +45,7 @@ jobs:
   build:
     # macos-14 ships Xcode 15.x, whose iig matches the xnu-8796.141.3 IORPC ABI
     # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks).
-    runs-on: macos-14
+    runs-on: ${{ inputs.runner || 'macos-14' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +107,7 @@ jobs:
           sw_vers
           ls -d /Applications/Xcode*.app
           XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          if [ -n "${{ inputs.xcode }}" ]; then XC=/Applications/Xcode_${{ inputs.xcode }}.app; fi
           echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
           sudo xcode-select -s "$XC"
           xcodebuild -version
