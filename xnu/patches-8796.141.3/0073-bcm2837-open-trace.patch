@@ -16,7 +16,7 @@
 +	char buf[192];
 +	size_t len = 0;
 +
-+	if (count >= 1500) {
++	if (count >= 20000) {
 +		return;
 +	}
 +	if (UIO_SEG_IS_USER_SPACE(ndp->ni_segflg)) {
