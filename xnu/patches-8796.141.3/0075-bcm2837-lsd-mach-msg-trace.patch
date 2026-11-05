@@ -1,6 +1,6 @@
 --- a/osfmk/ipc/ipc_kmsg.c
 +++ b/osfmk/ipc/ipc_kmsg.c
-@@ -2910,6 +2910,43 @@
+@@ -2910,6 +2910,56 @@
  
  	port = hdr->msgh_remote_port;
  	assert(IP_VALID(port));
@@ -27,6 +27,11 @@
 +				}
 +			}
 +			ip_mq_unlock(port);
++			/* skip the chatty destinations (launchd, logd, notifyd, ...): keep pkd, the managers and unresolved ports */
++			if (strcmp(dname, "pkd") != 0 && strcmp(dname, "?") != 0 && strncmp(dname, "containermanag", 14) != 0 &&
++			    strcmp(dname, "usermanagerd") != 0) {
++				goto sweet_msg_done;
++			}
 +			for (i = 0; kmsg->ikm_type == IKM_TYPE_ALL_INLINED && sz > sizeof(*hdr) && i < sz - sizeof(*hdr) && i < 400 && n < sizeof(text) - 1; i++) {
 +				uint8_t c = body[i];
 +				if (c >= 0x20 && c < 0x7f) {
@@ -36,9 +41,17 @@
 +				}
 +			}
 +			text[n] = 0;
++			char hex[97];
++			for (i = 0; kmsg->ikm_type == IKM_TYPE_ALL_INLINED && i < 48 && sz > sizeof(*hdr) && i < sz - sizeof(*hdr); i++) {
++				hex[i * 2] = "0123456789abcdef"[body[i] >> 4];
++				hex[i * 2 + 1] = "0123456789abcdef"[body[i] & 15];
++			}
++			hex[i * 2] = 0;
 +			mcount++;
-+			printf("SWEET lsd msg to %s id 0x%x size %u: %s\n", dname, hdr->msgh_id, sz, text);
++			printf("SWEET lsd msg to %s id 0x%x size %u: %s | %s\n", dname, hdr->msgh_id, sz, hex, text);
 +		}
++sweet_msg_done:
++		;
 +	}
 +#endif /* BCM2837 */
  	ip_mq_lock(port);
