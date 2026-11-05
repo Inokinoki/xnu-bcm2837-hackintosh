@@ -1,6 +1,6 @@
 --- a/bsd/dev/arm/systemcalls.c
 +++ b/bsd/dev/arm/systemcalls.c
-@@ -181,6 +181,32 @@
+@@ -181,6 +181,30 @@
  	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
  	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
  
@@ -17,13 +17,11 @@
 +			bool is_write = code == 4 || code == 121 || code == 153; /* write, writev, pwrite */
 +			if (is_write && wcount < 4000) {
 +				wcount++;
-+				printf("SWEET lsd sc %d fd %d len %lu err %d
-+", code, (int)uthread->uu_arg[0],
++				printf("SWEET lsd sc %d fd %d len %lu err %d\n", code, (int)uthread->uu_arg[0],
 +				    (unsigned long)uthread->uu_arg[2], error);
 +			} else if (!is_write && error > 0 && error != ENOENT && error != EINTR && error != EAGAIN && ecount < 6000) {
 +				ecount++;
-+				printf("SWEET lsd sc %d err %d a0 0x%llx a1 0x%llx
-+", code, error, (unsigned long long)uthread->uu_arg[0],
++				printf("SWEET lsd sc %d err %d a0 0x%llx a1 0x%llx\n", code, error, (unsigned long long)uthread->uu_arg[0],
 +				    (unsigned long long)uthread->uu_arg[1]);
 +			}
 +		}
