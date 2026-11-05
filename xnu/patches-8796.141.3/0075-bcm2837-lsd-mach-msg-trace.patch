@@ -1,6 +1,6 @@
 --- a/osfmk/ipc/ipc_kmsg.c
 +++ b/osfmk/ipc/ipc_kmsg.c
-@@ -2910,6 +2910,41 @@
+@@ -2910,6 +2910,43 @@
  
  	port = hdr->msgh_remote_port;
  	assert(IP_VALID(port));
@@ -11,8 +11,10 @@
 +	 */
 +	{
 +		static int mcount;
-+		char sname[32];
-+		proc_selfname(sname, sizeof(sname));
++		char sname[32] = "";
++		if (get_bsdtask_info(current_task())) {
++			strlcpy(sname, proc_name_address(get_bsdtask_info(current_task())), sizeof(sname));
++		}
 +		if (mcount < 20000 && strcmp(sname, "lsd") == 0) {
 +			char dname[32] = "?", text[120];
 +			uint32_t n = 0, sz = hdr->msgh_size, i;
