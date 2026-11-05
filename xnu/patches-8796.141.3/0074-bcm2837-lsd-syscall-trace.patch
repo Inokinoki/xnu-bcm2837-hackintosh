@@ -1,0 +1,35 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -181,6 +181,32 @@
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+ 
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++	/*
++	 * Trace: what lsd writes and which of its syscalls fail (its os_log output never reaches a file, and it registers
++	 * the apps but drops the plug-ins; look for the failing step).
++	 */
++	{
++		static int wcount, ecount;
++		char name[32];
++		proc_selfname(name, sizeof(name));
++		if (strcmp(name, "lsd") == 0) {
++			bool is_write = code == 4 || code == 121 || code == 153; /* write, writev, pwrite */
++			if (is_write && wcount < 4000) {
++				wcount++;
++				printf("SWEET lsd sc %d fd %d len %lu err %d
++", code, (int)uthread->uu_arg[0],
++				    (unsigned long)uthread->uu_arg[2], error);
++			} else if (!is_write && error > 0 && error != ENOENT && error != EINTR && error != EAGAIN && ecount < 6000) {
++				ecount++;
++				printf("SWEET lsd sc %d err %d a0 0x%llx a1 0x%llx
++", code, error, (unsigned long long)uthread->uu_arg[0],
++				    (unsigned long long)uthread->uu_arg[1]);
++			}
++		}
++	}
++#endif /* BCM2837 */
++
+ #if CONFIG_MACF
+ skip_syscall:
+ #endif /* CONFIG_MACF */
