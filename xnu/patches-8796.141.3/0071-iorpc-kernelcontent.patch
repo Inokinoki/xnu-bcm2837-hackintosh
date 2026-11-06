@@ -1,0 +1,30 @@
+--- a/iokit/IOKit/IORPC.h
++++ b/iokit/IOKit/IORPC.h
+@@ -224,6 +224,7 @@
+ 	IORPCMessageMach * reply;
+ 	uint32_t           sendSize;
+ 	uint32_t           replySize;
++	IORPCMessage *     kernelContent;   /* what Xcode 16's iig-generated code reads (rpc.kernelContent) */
+ };
+ typedef struct IORPC IORPC;
+ 
+--- a/iokit/Kernel/IOUserServer.cpp
++++ b/iokit/Kernel/IOUserServer.cpp
+@@ -3209,7 +3209,8 @@
+ 		msgout = (typeof(msgout))ikm_header(replykmsg);
+ 	}
+ 
+-	IORPC rpc = { .message = msgin, .reply = msgout, .sendSize = msgin->msgh.msgh_size, .replySize = replyAlloc };
++	IORPC rpc = { .message = msgin, .reply = msgout, .sendSize = msgin->msgh.msgh_size, .replySize = replyAlloc,
++		      .kernelContent = IORPCMessageFromMach(msgin, false) };
+ 
+ 	if (object) {
+ 		kern_allocation_name_t prior;
+@@ -3355,6 +3356,7 @@
+ 	mach->msgh_body.msgh_descriptor_count = ((mach_msg_size_t) refs);
+ 
+ 	rpc.message   = mach;
++	rpc.kernelContent = IORPCMessageFromMach(mach, false);
+ 	rpc.sendSize  = mach->msgh.msgh_size;
+ 	rpc.reply     = (IORPCMessageMach *) (p + inSize);
+ 	rpc.replySize = ((uint32_t) (sizeof(buffer.buffer) - inSize));    // inSize was checked

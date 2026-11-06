@@ -1,0 +1,20 @@
+--- a/security/mac_base.c
++++ b/security/mac_base.c
+@@ -251,8 +251,17 @@
+ static int mac_policy_busy;
+ 
+ #if !XNU_TARGET_OS_OSX
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++/*
++ * BCM2837: the built-in policies (AMFI, Sandbox stand-ins) register from IOKit start-up,
++ * after __DATA_CONST has been made read-only, so the iOS read-only-late list would fault.
++ */
++mac_policy_list_t mac_policy_list;
++static struct mac_policy_list_element mac_policy_static_entries[MAC_POLICY_LIST_CHUNKSIZE];
++#else
+ SECURITY_READ_ONLY_LATE(mac_policy_list_t) mac_policy_list;
+ SECURITY_READ_ONLY_LATE(static struct mac_policy_list_element) mac_policy_static_entries[MAC_POLICY_LIST_CHUNKSIZE];
++#endif
+ #else
+ mac_policy_list_t mac_policy_list;
+ #endif

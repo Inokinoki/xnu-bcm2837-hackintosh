@@ -1,0 +1,64 @@
+--- a/bsd/kern/kern_mib.c
++++ b/bsd/kern/kern_mib.c
+@@ -518,7 +518,9 @@
+ 		 * Deprecated variables.  We still support these for
+ 		 * backwards compatibility purposes only.
+ 		 */
+-#if XNU_TARGET_OS_OSX && defined(__arm64__)
++#if XNU_TARGET_OS_OSX && defined(__arm64__) && !defined(ARM64_BOARD_CONFIG_BCM2837)
++	/* BCM2837: the macOS config runs the iOS userland, which wants the device-tree names
++	 * (hw.machine iPhone10,3, hw.model D22AP). */
+ 	/* The following two are kludged for backward
+ 	 * compatibility. Use hw.product/hw.target for something
+ 	 * consistent instead. */
+--- a/iokit/Kernel/arm/BCM2837PlatformExpert.cpp
++++ b/iokit/Kernel/arm/BCM2837PlatformExpert.cpp
+@@ -18,8 +18,6 @@
+ 	void processTopLevel(IORegistryEntry *root) APPLE_KEXT_OVERRIDE;
+ 	const char *deleteList(void) APPLE_KEXT_OVERRIDE;
+ 	const char *excludeList(void) APPLE_KEXT_OVERRIDE;
+-	bool getTargetName(char *name, int maxLength) APPLE_KEXT_OVERRIDE;
+-	bool getProductName(char *name, int maxLength) APPLE_KEXT_OVERRIDE;
+ };
+ 
+ OSDefineMetaClassAndStructors(BCM2837PlatformExpert, IODTPlatformExpert);
+@@ -76,23 +74,9 @@
+ 	}
+ }
+ 
+-bool
+-BCM2837PlatformExpert::getTargetName(char *name, int maxLength)
+-{
+-	if (name == NULL || maxLength <= 0) {
+-		return false;
+-	}
+-	strlcpy(name, "bcm2837", (size_t)maxLength);
+-	return true;
+-}
+-
+-bool
+-BCM2837PlatformExpert::getProductName(char *name, int maxLength)
+-{
+-	if (name == NULL || maxLength <= 0) {
+-		return false;
+-	}
+-	strlcpy(name, "Raspberry Pi 3 Model B", (size_t)maxLength);
+-	return true;
+-}
++/*
++ * hw.target / hw.product come from IODTPlatformExpert: the first root "compatible" string and
++ * "model" (D22AP / iPhone10,3 when the ADT carries the iPhone X identity), which is what the iPhone
++ * userland (MobileGestalt) expects.
++ */
+ #endif /* ARM64_BOARD_CONFIG_BCM2837 */
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -61,7 +61,7 @@
+ #define BCM2837_FB_NOTIFY_TYPES           8
+ #define BCM2837_FB_NOTIFY_VSYNC           5
+ #define BCM2837_FB_VSYNC_US               16667
+-#define BCM2837_FB_DOT_PITCH              395     /* ppi, 6.67" 1080x2400 */
++#define BCM2837_FB_DOT_PITCH              458     /* ppi, as the iPhone X panel */
+ #define BCM2837_FB_FORMAT_BGRA            0x42475241
+ 
+ class IOMobileFramebuffer : public IOService {

@@ -1,0 +1,23 @@
+--- a/bsd/kern/kern_trustcache.c
++++ b/bsd/kern/kern_trustcache.c
+@@ -223,11 +223,20 @@
+ 
+ /* Immutable part of the runtime */
+ SECURITY_READ_ONLY_LATE(TrustCacheRuntime_t) trust_cache_rt_storage;
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++/* trust_cache_runtime_init() does not run on BCM2837: there is no runtime, so no caches. */
++SECURITY_READ_ONLY_LATE(TrustCacheRuntime_t*) trust_cache_rt = NULL;
++#else
+ SECURITY_READ_ONLY_LATE(TrustCacheRuntime_t*) trust_cache_rt = &trust_cache_rt_storage;
++#endif
+ 
+ /* Mutable part of the runtime */
+ TrustCacheMutableRuntime_t trust_cache_mut_rt_storage;
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++SECURITY_READ_ONLY_LATE(TrustCacheMutableRuntime_t*) trust_cache_mut_rt = NULL;
++#else
+ SECURITY_READ_ONLY_LATE(TrustCacheMutableRuntime_t*) trust_cache_mut_rt = &trust_cache_mut_rt_storage;
++#endif
+ 
+ void
+ trust_cache_runtime_init(void)

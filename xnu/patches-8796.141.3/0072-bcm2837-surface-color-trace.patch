@@ -1,0 +1,101 @@
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -430,6 +430,53 @@
+ 
+ static uint64_t sweet_surf_logged;      /* selectors / traps already logged (< 64) */
+ 
++/*
++ * Trace: per-channel statistics of the pixels a client just wrote (every 64th pixel in each direction), for
++ * the first unlocks: what do the intermediate surfaces (luminance+alpha masks, BGRA layers) hold?
++ */
++static uint32_t sweet_surf_trace_count;
++
++static void
++sweet_surface_trace_unlock(SweetSurface *s)
++{
++	if (sweet_surf_trace_count >= 400 || (s->bytesPerElement != 2 && s->bytesPerElement != 4) ||
++	    s->planeCount != 0 || s->width == 0 || s->height == 0) {
++		return;
++	}
++	uint64_t need = (uint64_t)s->offset + (uint64_t)(s->height - 1) * s->bytesPerRow +
++	    (uint64_t)s->width * s->bytesPerElement;
++	if (s->memory == NULL || need > s->memory->getLength()) {
++		return;
++	}
++	uintptr_t base = s->kernelAddress();
++	if (base == 0) {
++		return;
++	}
++	sweet_surf_trace_count++;
++	const uint8_t *p = (const uint8_t *)(base + s->offset);
++	uint32_t bpe = s->bytesPerElement;
++	uint32_t ystep = s->height > 64 ? s->height / 64 : 1, xstep = s->width > 64 ? s->width / 64 : 1;
++	uint64_t sum[4] = { 0, 0, 0, 0 }, nz[4] = { 0, 0, 0, 0 }, n = 0;
++	uint32_t mx[4] = { 0, 0, 0, 0 };
++	for (uint32_t y = 0; y < s->height; y += ystep) {
++		for (uint32_t x = 0; x < s->width; x += xstep) {
++			const uint8_t *px = p + (uint64_t)y * s->bytesPerRow + (uint64_t)x * bpe;
++			for (uint32_t c = 0; c < bpe; c++) {
++				sum[c] += px[c];
++				nz[c] += px[c] != 0;
++				mx[c] = px[c] > mx[c] ? px[c] : mx[c];
++			}
++			n++;
++		}
++	}
++	char name[32];
++	proc_selfname(name, sizeof(name));
++	IOLog("BCM2837 SURF: unlock %s id %u %ux%u fmt 0x%x bpe %u n %llu mean %llu %llu %llu %llu nz %llu %llu %llu %llu max %u %u %u %u\n",
++	    name, s->id, s->width, s->height, s->pixelFormat, bpe, n,
++	    sum[0] / (n ? n : 1), sum[1] / (n ? n : 1), sum[2] / (n ? n : 1), sum[3] / (n ? n : 1),
++	    nz[0], nz[1], nz[2], nz[3], mx[0], mx[1], mx[2], mx[3]);
++}
++
+ static void
+ sweet_surf_log_once(const char *what, uint32_t n)
+ {
+@@ -842,6 +889,9 @@
+ 	if (s == NULL) {
+ 		return kIOReturnNotFound;
+ 	}
++	if (!((uintptr_t)options & kIOSurfaceLockReadOnly)) {
++		sweet_surface_trace_unlock(s);
++	}
+ 	IOReturn ret = sweet_surface_seed_out(s, seedOut,
+ 	    !((uintptr_t)options & kIOSurfaceLockReadOnly));
+ 	s->release();
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -396,6 +396,32 @@
+ 		}
+ 		s->release();
+ 	}
++
++	/* Trace: what the panel now holds in the lock-screen clock and dock regions (BGRA bytes). */
++	if (fPresents <= 200 || (fPresents % 20) == 0) {
++		static const uint32_t regions[2][4] = { { 100, 330, 1025, 700 }, { 30, 2100, 1095, 2390 } };
++		for (int r = 0; r < 2; r++) {
++			uint32_t bright = 0, redish = 0, total = 0, bb = 0, bg = 0, br = 0, bsum = 0;
++			for (uint32_t y = regions[r][1]; y < regions[r][3] && y < fHeight; y += 3) {
++				for (uint32_t x = regions[r][0]; x < regions[r][2] && x < fWidth; x += 3) {
++					const uint8_t *px = (const uint8_t *)(fPixels + (uint64_t)y * fRowBytes + (uint64_t)x * 4);
++					uint32_t sum = px[0] + px[1] + px[2];
++					total++;
++					if (sum > 180) {
++						bright++;
++						if (px[2] > 200 && px[1] < 150 && px[0] < 150) {
++							redish++;
++						}
++						if (sum > bsum) {
++							bsum = sum; bb = px[0]; bg = px[1]; br = px[2];
++						}
++					}
++				}
++			}
++			IOLog("BCM2837 FB: panel %s present %llu bright %u/%u redish %u brightest B %u G %u R %u\n",
++			    r == 0 ? "clock" : "dock", fPresents, bright, total, redish, bb, bg, br);
++		}
++	}
+ }
+ 
+ bool

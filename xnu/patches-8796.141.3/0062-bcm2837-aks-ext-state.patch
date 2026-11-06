@@ -1,0 +1,32 @@
+--- a/iokit/Kernel/arm/SweetKeyStore.cpp
++++ b/iokit/Kernel/arm/SweetKeyStore.cpp
+@@ -41,11 +41,13 @@
+ 	kAKSLockBag          = 13,
+ 	kAKSGetSystem        = 14,
+ 	kAKSGetDeviceState   = 17,
++	kAKSGetExtDeviceState = 35,     /* aks_get_extended_device_state */
+ 	kAKSAssertHold       = 26,
+ 	kAKSAssertDrop       = 27,
+ 	kAKSUnloadSessionBags = 55,
+ 	kAKSNotifyStateSet   = 102,
+ 	kAKSNotifyStateIsSet = 103,
++	kAKSAssertConsume    = 101,     /* aks_assert_consume */
+ };
+ 
+ /* The system (device) bag handle. */
+@@ -190,6 +192,7 @@
+ 	case kAKSLockBag:
+ 	case kAKSAssertHold:
+ 	case kAKSAssertDrop:
++	case kAKSAssertConsume:
+ 	case kAKSUnloadSessionBags:
+ 	case kAKSNotifyStateSet:
+ 		args->scalarOutputCount = 0;
+@@ -220,6 +223,7 @@
+ 		args->scalarOutputCount = 1;
+ 		break;
+ 	case kAKSGetDeviceState:
++	case kAKSGetExtDeviceState:
+ 		args->scalarOutputCount = 0;
+ 		ret = sweet_aks_device_state(args);
+ 		break;

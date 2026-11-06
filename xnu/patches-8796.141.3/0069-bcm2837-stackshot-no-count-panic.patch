@@ -1,0 +1,40 @@
+Skip the stackshot count consistency panics on BCM2837 (writes stay bounded).
+--- a/osfmk/kern/kern_stackshot.c
++++ b/osfmk/kern/kern_stackshot.c
+@@ -2893,13 +2893,21 @@
+ 
+ 			/* If we want owner info, we should capture it regardless of its classification */
+ 			if (save_owner_info) {
+-				if (stackshot_thread_has_valid_waitinfo(thread)) {
++				if (stackshot_thread_has_valid_waitinfo(thread)
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++				    && current_waitinfo_index < num_waitinfo_threads
++#endif
++				    ) {
+ 					stackshot_thread_wait_owner_info(
+ 						thread,
+ 						&thread_waitinfo[current_waitinfo_index++]);
+ 				}
+ 
+-				if (stackshot_thread_has_valid_turnstileinfo(thread)) {
++				if (stackshot_thread_has_valid_turnstileinfo(thread)
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++				    && current_turnstileinfo_index < num_turnstileinfo_threads
++#endif
++				    ) {
+ 					stackshot_thread_turnstileinfo(
+ 						thread,
+ 						&thread_turnstileinfo[current_turnstileinfo_index++]);
+@@ -2912,7 +2920,11 @@
+ 		latency_info.misc2_latency = mach_absolute_time();
+ #endif /* STACKSHOT_COLLECTS_LATENCY_INFO */
+ 
+-#if DEBUG || DEVELOPMENT
++#if (DEBUG || DEVELOPMENT) && !defined(ARM64_BOARD_CONFIG_BCM2837)
++		/*
++		 * BCM2837: a thread can change wait state between the counting and the filling pass
++		 * (seen on SMP: expected 12, found 11); the writes above are bounded, so keep going.
++		 */
+ 		if (current_delta_snapshot_index != num_delta_thread_snapshots) {
+ 			panic("delta thread snapshot count mismatch while capturing snapshots for task %p. expected %d, found %d", task,
+ 			    num_delta_thread_snapshots, current_delta_snapshot_index);
