@@ -1,0 +1,71 @@
+--- a/osfmk/ipc/ipc_kmsg.c
++++ b/osfmk/ipc/ipc_kmsg.c
+@@ -2910,6 +2910,68 @@
+ 
+ 	port = hdr->msgh_remote_port;
+ 	assert(IP_VALID(port));
++#if defined(ARM64_BOARD_CONFIG_BCM2837)
++	/*
++	 * Trace: mach messages between lsd and pkd (plug-in registration): lsd -> pkd, and everything pkd sends except to the
++	 * chatty daemons. Prints destination, id, size, the remote port right type (18 move-send-once / 21 make-send-once mean a
++	 * reply), the first body bytes in hex and the printable text (XPC keys), also for out-of-line message data.
++	 */
++	{
++		static int mcount;
++		char sname[32] = "";
++		if (get_bsdtask_info(current_task())) {
++			strlcpy(sname, proc_name_address(get_bsdtask_info(current_task())), sizeof(sname));
++		}
++		bool from_lsd = strcmp(sname, "lsd") == 0;
++		if (mcount < 20000 && (from_lsd || strcmp(sname, "pkd") == 0)) {
++			char dname[32] = "?", text[160], hex[129];
++			uint32_t n = 0, sz = hdr->msgh_size, i, nb = 0;
++			const uint8_t *body = NULL;
++			ip_mq_lock(port);
++			if (ip_active(port) && ip_in_a_space(port) && !ip_in_space(port, ipc_space_kernel)) {
++				ipc_space_t dspace = ip_get_receiver(port);
++				if (dspace && is_active(dspace) && get_bsdtask_info(dspace->is_task)) {
++					strlcpy(dname, proc_name_address(get_bsdtask_info(dspace->is_task)), sizeof(dname));
++				}
++			}
++			ip_mq_unlock(port);
++			bool chatty = strcmp(dname, "launchd") == 0 || strcmp(dname, "logd") == 0 || strcmp(dname, "notifyd") == 0 ||
++			    strcmp(dname, "cfprefsd") == 0 || strcmp(dname, "usermanagerd") == 0;
++			if (from_lsd ? strcmp(dname, "pkd") == 0 : !chatty) {
++				bool complex = (hdr->msgh_bits & MACH_MSGH_BITS_COMPLEX) != 0;
++				mach_msg_size_t dc = complex ? ((mach_msg_base_t *)hdr)->body.msgh_descriptor_count : 0;
++				if (kmsg->ikm_type == IKM_TYPE_ALL_INLINED) {
++					body = (const uint8_t *)ikm_udata(kmsg, dc, complex);
++					uint32_t off = (uint32_t)((vm_offset_t)body - (vm_offset_t)hdr);
++					nb = sz > off ? sz - off : 0;
++				} else if (kmsg->ikm_type == IKM_TYPE_UDATA_OOL || kmsg->ikm_type == IKM_TYPE_ALL_OOL) {
++					body = (const uint8_t *)kmsg->ikm_udata;
++					nb = kmsg->ikm_udata_size;
++				}
++				if (nb > 400) {
++					nb = 400;
++				}
++				for (i = 0; body && i < nb && n < sizeof(text) - 1; i++) {
++					uint8_t c = body[i];
++					if (c >= 0x20 && c < 0x7f) {
++						text[n++] = (char)c;
++					} else if (n && text[n - 1] != '.') {
++						text[n++] = '.';
++					}
++				}
++				text[n] = 0;
++				for (i = 0; body && i < 64 && i < nb; i++) {
++					hex[i * 2] = "0123456789abcdef"[body[i] >> 4];
++					hex[i * 2 + 1] = "0123456789abcdef"[body[i] & 15];
++				}
++				hex[i * 2] = 0;
++				mcount++;
++				printf("SWEET ipc %s -> %s id 0x%x size %u remote %u type %d: %s | %s\n", sname, dname, hdr->msgh_id, sz,
++				    (unsigned)MACH_MSGH_BITS_REMOTE(hdr->msgh_bits), (int)kmsg->ikm_type, hex, text);
++			}
++		}
++	}
++#endif /* BCM2837 */
+ 	ip_mq_lock(port);
+ 
+ 	/*
